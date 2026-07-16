@@ -252,7 +252,6 @@ export function MapPanel() {
     if (map.getLayer('basemap')) {
       map.setPaintProperty('basemap', 'raster-opacity', showBasemap ? 1 : 0.12)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     map,
     styleVersion,

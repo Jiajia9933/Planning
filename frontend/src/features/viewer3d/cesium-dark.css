@@ -1,0 +1,20 @@
+/* Re-skins Cesium's default credit/attribution chrome to match the dark theme
+   (all other stock widgets — animation, timeline, base layer picker, etc. —
+   are disabled in the Viewer constructor instead of styled here). */
+.cesium-viewer-bottom {
+  display: flex;
+  align-items: center;
+}
+
+.cesium-credit-textContainer,
+.cesium-credit-imageContainer {
+  color: #8892a0;
+}
+
+.cesium-widget-credits {
+  background: rgba(15, 21, 31, 0.72) !important;
+}
+
+.cesium-viewer .cesium-widget-credits a {
+  color: #8892a0;
+}
