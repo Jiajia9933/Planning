@@ -112,6 +112,10 @@ export function rebuildSceneEntities(
       },
     })
   }
+
+  // Entity mutations are covered by Cesium's automatic dirty-tracking under
+  // requestRenderMode, but this call is cheap and removes any doubt.
+  viewer.scene.requestRender()
 }
 
 function surfaceMarker(point: GeoPoint, text: string, color: string, groundHeightM: number): Cesium.Entity.ConstructorOptions {

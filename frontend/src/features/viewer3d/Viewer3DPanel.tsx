@@ -71,6 +71,7 @@ export function Viewer3DPanel() {
     if (tool === 'orbit') {
       const handler = () => {
         viewer.camera.rotateRight(-0.002)
+        viewer.scene.requestRender()
       }
       viewer.clock.onTick.addEventListener(handler)
       return () => {

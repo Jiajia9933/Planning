@@ -14,6 +14,14 @@ const ionToken = import.meta.env.VITE_CESIUM_ION_TOKEN
  * OSM 3D Buildings with sun-based lighting, closer to a tool like ArcGIS
  * Scene Viewer. Both paths keep `depthTestAgainstTerrain` off so the
  * underground pipe/drill entities always render through the ground.
+ *
+ * `requestRenderMode` is on: Cesium's default is to redraw every single
+ * frame forever, whether or not anything changed, which pins the GPU (and
+ * fans) even sitting idle looking at a static scene. On-demand rendering
+ * only draws when the camera moves, an entity changes, or something else
+ * actually invalidates the frame — imperative mutations elsewhere in this
+ * feature (clipping planes, tileset add) call `scene.requestRender()`
+ * explicitly since those aren't covered by Cesium's automatic dirty-tracking.
  */
 export function useCesiumViewer() {
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -57,8 +65,14 @@ export function useCesiumViewer() {
               }),
             ),
           }),
-      shadows: !!ionToken,
-      requestRenderMode: false,
+      // Shadow mapping is one of the most GPU-expensive real-time rendering
+      // features (an extra render pass every frame) — not worth it against
+      // this project's "high performance" priority for the visual gain.
+      shadows: false,
+      requestRenderMode: true,
+      maximumRenderTimeChange: Infinity,
+      targetFrameRate: 30,
+      msaaSamples: 1,
     })
 
     instance.scene.globe.depthTestAgainstTerrain = false
@@ -70,6 +84,7 @@ export function useCesiumViewer() {
           if (disposed) return
           instance.scene.primitives.add(tileset)
           setBuildingsTileset(tileset)
+          instance.scene.requestRender()
         })
         .catch((error: unknown) => console.error('Cesium OSM Buildings failed to load', error))
     } else {

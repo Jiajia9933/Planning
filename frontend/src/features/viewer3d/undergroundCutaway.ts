@@ -91,6 +91,9 @@ export function applyCutaway(
     },
   })
   viewer.dataSources.add(dataSource)
+  // Clipping-plane and tileset property assignments aren't covered by
+  // Cesium's automatic dirty-tracking under requestRenderMode.
+  viewer.scene.requestRender()
 
   return { dataSource, globePlanes, tilesetPlanes }
 }
@@ -105,4 +108,5 @@ export function removeCutaway(
   viewer.scene.globe.clippingPlanes = new Cesium.ClippingPlaneCollection()
   if (buildingsTileset) buildingsTileset.clippingPlanes = new Cesium.ClippingPlaneCollection()
   if (handle) viewer.dataSources.remove(handle.dataSource, true)
+  viewer.scene.requestRender()
 }
