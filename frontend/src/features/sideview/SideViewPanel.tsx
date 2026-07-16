@@ -4,18 +4,63 @@ import { PanelFrame } from '../../layout/PanelFrame'
 import { colors, utilityColors } from '../../theme/tokens'
 import { mockUtilityLayers } from '../../data/mockPlanning'
 import { usePlanningStore } from '../../store/planningStore'
+import type { UtilityCrossing } from '../../types/hdd'
 
 const WIDTH = 640
 const HEIGHT = 280
 const MARGIN = { top: 12, right: 16, bottom: 28, left: 40 }
 const PLOT_W = WIDTH - MARGIN.left - MARGIN.right
 const PLOT_H = HEIGHT - MARGIN.top - MARGIN.bottom
+const CONFLICT_HOVER_RADIUS_PX = 9
+
+const utilityLabels = Object.fromEntries(mockUtilityLayers.map((l) => [l.type, l.label])) as Record<
+  UtilityCrossing['type'],
+  string
+>
+
+/** "Nice" round-number tick positions spanning [min, max] — unlike a fixed
+ * hardcoded list, this scales with however long/deep the current route is
+ * instead of silently truncating the axis when it exceeds a guessed range. */
+function niceTicks(min: number, max: number, targetCount = 6): number[] {
+  const span = max - min
+  if (span <= 0) return [min]
+  const rawStep = span / targetCount
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep))
+  const residual = rawStep / magnitude
+  const step = residual > 5 ? 10 * magnitude : residual > 2 ? 5 * magnitude : residual > 1 ? 2 * magnitude : magnitude
+  const start = Math.ceil(min / step) * step
+  const ticks: number[] = []
+  for (let v = start; v <= max; v += step) ticks.push(Math.round(v * 100) / 100)
+  return ticks
+}
+
+/** Catmull-Rom through the sample points, converted to cubic Bezier segments
+ * — reads as a natural terrain/bore curve instead of a faceted polyline. */
+function buildSmoothPath(points: { x: number; y: number }[]): string {
+  if (points.length < 2) return ''
+  const d = [`M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`]
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[Math.max(0, i - 1)]
+    const p1 = points[i]
+    const p2 = points[i + 1]
+    const p3 = points[Math.min(points.length - 1, i + 2)]
+    const cp1x = p1.x + (p2.x - p0.x) / 6
+    const cp1y = p1.y + (p2.y - p0.y) / 6
+    const cp2x = p2.x - (p3.x - p1.x) / 6
+    const cp2y = p2.y - (p3.y - p1.y) / 6
+    d.push(`C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)} ${cp2x.toFixed(1)} ${cp2y.toFixed(1)} ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`)
+  }
+  return d.join(' ')
+}
 
 export function SideViewPanel() {
   const profile = usePlanningStore((s) => s.profile)
   const minRadiusM = usePlanningStore((s) => s.result.minRadiusM)
   const conflicts = usePlanningStore((s) => s.conflicts)
+  const entryAngleDeg = usePlanningStore((s) => s.parameters.entryAngleDeg)
+  const exitAngleDeg = usePlanningStore((s) => s.parameters.exitAngleDeg)
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const [hoveredConflict, setHoveredConflict] = useState<UtilityCrossing | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
 
   const { maxDistance, minHeight, maxHeight } = useMemo(() => {
@@ -45,15 +90,37 @@ export function SideViewPanel() {
     return profile[profile.length - 1].terrainHeightM
   }
 
-  const buildPath = (key: 'terrainHeightM' | 'drillPathHeightM' | 'minRadiusHeightM') =>
-    profile
-      .map((p, i) => `${i === 0 ? 'M' : 'L'} ${xScale(p.distanceM).toFixed(1)} ${yScale(p[key]).toFixed(1)}`)
-      .join(' ')
+  const buildCurve = (key: 'terrainHeightM' | 'drillPathHeightM' | 'minRadiusHeightM') =>
+    buildSmoothPath(profile.map((p) => ({ x: xScale(p.distanceM), y: yScale(p[key]) })))
+
+  const conflictScreenPoints = useMemo(
+    () =>
+      conflicts.map((c) => ({
+        conflict: c,
+        cx: xScale(c.distanceM),
+        cy: yScale(terrainHeightAt(c.distanceM) - c.utilityDepthM),
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [conflicts, maxDistance, minHeight, maxHeight],
+  )
 
   const handleMove = (e: React.MouseEvent<SVGRectElement>) => {
     const rect = svgRef.current?.getBoundingClientRect()
     if (!rect) return
-    const relX = ((e.clientX - rect.left) / rect.width) * WIDTH - MARGIN.left
+    const scale = WIDTH / rect.width
+    const relX = (e.clientX - rect.left) * scale - MARGIN.left
+    const relY = (e.clientY - rect.top) * scale - MARGIN.top
+
+    const nearConflict = conflictScreenPoints.find(
+      (p) => Math.hypot(p.cx - relX, p.cy - relY) <= CONFLICT_HOVER_RADIUS_PX,
+    )
+    if (nearConflict) {
+      setHoveredConflict(nearConflict.conflict)
+      setHoverIndex(null)
+      return
+    }
+    setHoveredConflict(null)
+
     const distance = (relX / PLOT_W) * maxDistance
     let closest = 0
     let closestDelta = Infinity
@@ -68,14 +135,15 @@ export function SideViewPanel() {
   }
 
   const hovered = hoverIndex !== null ? profile[hoverIndex] : null
-  const yTicks = [30, 35, 40, 45, 50].filter((t) => t >= minHeight && t <= maxHeight)
-  const xTicks = [0, 20, 40, 60, 80, 100, 120].filter((t) => t <= maxDistance + 5)
+  const yTicks = niceTicks(minHeight, maxHeight)
+  const xTicks = niceTicks(0, maxDistance)
+
+  const tooltipDistanceM = hoveredConflict?.distanceM ?? hovered?.distanceM ?? 0
+  const tooltipLeftPct = ((MARGIN.left + xScale(tooltipDistanceM)) / WIDTH) * 100
+  const tooltipFlips = tooltipLeftPct > 62
 
   return (
-    <PanelFrame
-      title="Seitenansicht (Längsschnitt)"
-      actions={<SideViewLegend />}
-    >
+    <PanelFrame title="Seitenansicht (Längsschnitt)" actions={<SideViewLegend />}>
       <Box sx={{ position: 'relative', width: '100%', height: '100%' }}>
         <svg
           ref={svgRef}
@@ -99,37 +167,55 @@ export function SideViewPanel() {
               </text>
             ))}
 
-            <path d={buildPath('minRadiusHeightM')} fill="none" stroke={colors.textPrimary} strokeOpacity={0.5} strokeDasharray="4 4" strokeWidth={1.25} />
-            <path d={buildPath('terrainHeightM')} fill="none" stroke="#e2603f" strokeWidth={1.5} />
-            <path d={buildPath('drillPathHeightM')} fill="none" stroke={colors.accentOrange} strokeWidth={3} strokeLinecap="round" />
+            <path d={buildCurve('minRadiusHeightM')} fill="none" stroke={colors.textPrimary} strokeOpacity={0.5} strokeDasharray="4 4" strokeWidth={1.25} />
+            <path d={buildCurve('terrainHeightM')} fill="none" stroke="#e2603f" strokeWidth={1.5} />
+            <path d={buildCurve('drillPathHeightM')} fill="none" stroke={colors.accentOrange} strokeWidth={3} strokeLinecap="round" />
 
-            {conflicts.map((c, i) => {
-              const cx = xScale(c.distanceM)
-              const cy = yScale(terrainHeightAt(c.distanceM) - c.utilityDepthM)
-              return (
-                <g key={i}>
-                  <line
-                    x1={cx}
-                    x2={cx}
-                    y1={yScale(terrainHeightAt(c.distanceM))}
-                    y2={cy}
-                    stroke={utilityColors[c.type]}
-                    strokeOpacity={0.5}
-                    strokeWidth={1}
-                  />
-                  <circle
-                    cx={cx}
-                    cy={cy}
-                    r={c.isConflict ? 5 : 3.5}
-                    fill={c.isConflict ? colors.accentRed : utilityColors[c.type]}
-                    stroke={colors.bgApp}
-                    strokeWidth={1.25}
-                  />
-                </g>
-              )
-            })}
+            {profile.length > 0 && (
+              <>
+                <text
+                  x={xScale(profile[0].distanceM) + 6}
+                  y={yScale(profile[0].drillPathHeightM) - 8}
+                  fill={colors.textSecondary}
+                  fontSize={10}
+                >
+                  Eintritt {entryAngleDeg}°
+                </text>
+                <text
+                  x={xScale(profile[profile.length - 1].distanceM) - 6}
+                  y={yScale(profile[profile.length - 1].drillPathHeightM) - 8}
+                  fill={colors.textSecondary}
+                  fontSize={10}
+                  textAnchor="end"
+                >
+                  Austritt {exitAngleDeg}°
+                </text>
+              </>
+            )}
 
-            {hovered && (
+            {conflictScreenPoints.map(({ conflict: c, cx, cy }, i) => (
+              <g key={i}>
+                <line
+                  x1={cx}
+                  x2={cx}
+                  y1={yScale(terrainHeightAt(c.distanceM))}
+                  y2={cy}
+                  stroke={utilityColors[c.type]}
+                  strokeOpacity={0.5}
+                  strokeWidth={1}
+                />
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={c.isConflict ? 5 : 3.5}
+                  fill={c.isConflict ? colors.accentRed : utilityColors[c.type]}
+                  stroke={colors.bgApp}
+                  strokeWidth={1.25}
+                />
+              </g>
+            ))}
+
+            {hovered && !hoveredConflict && (
               <>
                 <line
                   x1={xScale(hovered.distanceM)}
@@ -151,18 +237,58 @@ export function SideViewPanel() {
               height={PLOT_H}
               fill="transparent"
               onMouseMove={handleMove}
-              onMouseLeave={() => setHoverIndex(null)}
+              onMouseLeave={() => {
+                setHoverIndex(null)
+                setHoveredConflict(null)
+              }}
             />
           </g>
         </svg>
 
-        {hovered && (
+        {hoveredConflict && (
           <Box
             sx={{
               position: 'absolute',
-              left: `${(MARGIN.left + xScale(hovered.distanceM)) / WIDTH * 100}%`,
+              left: `${tooltipLeftPct}%`,
               top: '18%',
-              transform: 'translate(12px, 0)',
+              transform: tooltipFlips ? 'translate(calc(-100% - 12px), 0)' : 'translate(12px, 0)',
+              bgcolor: colors.bgElevated,
+              border: `1px solid ${colors.borderStrong}`,
+              borderRadius: 1,
+              px: 1.25,
+              py: 0.75,
+              pointerEvents: 'none',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+              minWidth: 160,
+            }}
+          >
+            <Typography
+              variant="caption"
+              sx={{ display: 'block', fontWeight: 700 }}
+              color={hoveredConflict.isConflict ? colors.accentRed : colors.textPrimary}
+            >
+              {hoveredConflict.isConflict ? '⚠ Konflikt: ' : 'Kreuzung: '}
+              {utilityLabels[hoveredConflict.type]}
+            </Typography>
+            <Typography variant="caption" color={colors.textSecondary} sx={{ display: 'block' }}>
+              Distanz: {hoveredConflict.distanceM.toFixed(2)} m
+            </Typography>
+            <Typography variant="caption" color={colors.textSecondary} sx={{ display: 'block' }}>
+              Bohrtiefe: {hoveredConflict.drillDepthM.toFixed(2)} m · Leitung: {hoveredConflict.utilityDepthM.toFixed(2)} m
+            </Typography>
+            <Typography variant="caption" color={colors.textSecondary} sx={{ display: 'block' }}>
+              Abstand: {hoveredConflict.clearanceM.toFixed(2)} m
+            </Typography>
+          </Box>
+        )}
+
+        {hovered && !hoveredConflict && (
+          <Box
+            sx={{
+              position: 'absolute',
+              left: `${tooltipLeftPct}%`,
+              top: '18%',
+              transform: tooltipFlips ? 'translate(calc(-100% - 12px), 0)' : 'translate(12px, 0)',
               bgcolor: colors.bgElevated,
               border: `1px solid ${colors.borderStrong}`,
               borderRadius: 1,
