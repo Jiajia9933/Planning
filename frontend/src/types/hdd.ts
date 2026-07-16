@@ -21,6 +21,8 @@ export interface PlanningParameters {
   minDrillRadiusM: number
   entryAngleDeg: number
   exitAngleDeg: number
+  /** Minimum required clearance to existing utilities (§5.3 "Safety Distance"). */
+  safetyDistanceM: number
 }
 
 export interface PlanningResult {
@@ -52,4 +54,15 @@ export interface ProfileSample {
   terrainHeightM: number
   drillPathHeightM: number
   minRadiusHeightM: number
+}
+
+/** Where the planned bore crosses a pre-existing utility, in plan and depth. */
+export interface UtilityCrossing {
+  type: UtilityType
+  point: GeoPoint
+  distanceM: number
+  drillDepthM: number
+  utilityDepthM: number
+  clearanceM: number
+  isConflict: boolean
 }

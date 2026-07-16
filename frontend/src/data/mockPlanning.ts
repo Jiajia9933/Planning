@@ -11,6 +11,7 @@ export const mockPlanningParameters: PlanningParameters = {
   minDrillRadiusM: 30,
   entryAngleDeg: 12,
   exitAngleDeg: 12,
+  safetyDistanceM: 1.0,
 }
 
 export const mockUtilityLayers: UtilityLayerState[] = [

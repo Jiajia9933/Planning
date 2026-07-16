@@ -33,7 +33,7 @@ import {
   buildDrillRouteFeature,
   buildParcelGridFeatureCollection,
   buildUtilityLinesFeatureCollection,
-} from './mockGeometry'
+} from '../../domain/mockGeometry'
 import './maplibre-dark.css'
 
 const tools = [
@@ -73,6 +73,7 @@ export function MapPanel() {
   const endPoint = usePlanningStore((s) => s.parameters.endPoint)
   const pointPickMode = usePlanningStore((s) => s.pointPickMode)
   const setPoint = usePlanningStore((s) => s.setPoint)
+  const conflicts = usePlanningStore((s) => s.conflicts)
 
   const [tool, setTool] = useState('select')
   const [layers, setLayers] = useState<UtilityLayerState[]>(mockUtilityLayers)
@@ -93,6 +94,17 @@ export function MapPanel() {
   const parcelFeatureCollection = useMemo(
     () => buildParcelGridFeatureCollection(startPoint, endPoint),
     [startPoint, endPoint],
+  )
+  const crossingFeatureCollection = useMemo(
+    () => ({
+      type: 'FeatureCollection' as const,
+      features: conflicts.map((c) => ({
+        type: 'Feature' as const,
+        properties: { isConflict: c.isConflict, type: c.type },
+        geometry: { type: 'Point' as const, coordinates: [c.point.lng, c.point.lat] },
+      })),
+    }),
+    [conflicts],
   )
 
   const toggleLayer = (type: UtilityLayerState['type']) => {
@@ -210,11 +222,48 @@ export function MapPanel() {
       map.setLayoutProperty(`utility-${l.type}`, 'visibility', l.visible ? 'visible' : 'none')
     })
 
+    if (!map.getSource('utility-crossings')) {
+      map.addSource('utility-crossings', { type: 'geojson', data: crossingFeatureCollection })
+      map.addLayer({
+        id: 'utility-crossings-halo',
+        type: 'circle',
+        source: 'utility-crossings',
+        paint: {
+          'circle-radius': 9,
+          'circle-color': ['case', ['get', 'isConflict'], colors.accentRed, colors.accentGreen],
+          'circle-opacity': 0.25,
+        },
+      })
+      map.addLayer({
+        id: 'utility-crossings-dot',
+        type: 'circle',
+        source: 'utility-crossings',
+        paint: {
+          'circle-radius': 4,
+          'circle-color': ['case', ['get', 'isConflict'], colors.accentRed, colors.accentGreen],
+          'circle-stroke-width': 1.5,
+          'circle-stroke-color': colors.bgApp,
+        },
+      })
+    } else {
+      ;(map.getSource('utility-crossings') as GeoJSONSource).setData(crossingFeatureCollection)
+    }
+
     if (map.getLayer('basemap')) {
       map.setPaintProperty('basemap', 'raster-opacity', showBasemap ? 1 : 0.12)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, styleVersion, layers, showParcels, showBasemap, routeFeature, utilityFeatureCollection, parcelFeatureCollection])
+  }, [
+    map,
+    styleVersion,
+    layers,
+    showParcels,
+    showBasemap,
+    routeFeature,
+    utilityFeatureCollection,
+    parcelFeatureCollection,
+    crossingFeatureCollection,
+  ])
 
   const pickHint =
     pointPickMode === 'start'

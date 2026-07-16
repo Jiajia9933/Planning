@@ -17,13 +17,16 @@ export const colors = {
   accentRed: '#ef4444',
 } as const
 
+// Deliberately disjoint from the semantic accents above (accentGreen = safe/
+// start, accentRed = conflict/end, accentOrange = drill path, accentBlue =
+// UI selection) so a utility's own color is never mistaken for a status.
 export const utilityColors = {
   strom: '#eab308',
-  gas: '#3b82f6',
-  wasser: '#38bdf8',
-  fernwaerme: '#ef4444',
+  gas: '#a855f7',
+  wasser: '#06b6d4',
+  fernwaerme: '#9f1239',
   telekommunikation: '#ec4899',
-  abwasser: '#22c55e',
+  abwasser: '#78716c',
 } as const
 
 export type UtilityKey = keyof typeof utilityColors

@@ -14,6 +14,7 @@ const PLOT_H = HEIGHT - MARGIN.top - MARGIN.bottom
 export function SideViewPanel() {
   const profile = usePlanningStore((s) => s.profile)
   const minRadiusM = usePlanningStore((s) => s.result.minRadiusM)
+  const conflicts = usePlanningStore((s) => s.conflicts)
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
 
@@ -29,6 +30,20 @@ export function SideViewPanel() {
 
   const xScale = (d: number) => (d / maxDistance) * PLOT_W
   const yScale = (h: number) => PLOT_H - ((h - minHeight) / (maxHeight - minHeight)) * PLOT_H
+
+  const terrainHeightAt = (distanceM: number) => {
+    if (profile.length === 0) return 0
+    for (let i = 0; i < profile.length - 1; i++) {
+      const a = profile[i]
+      const b = profile[i + 1]
+      if (distanceM >= a.distanceM && distanceM <= b.distanceM) {
+        const span = b.distanceM - a.distanceM
+        const t = span === 0 ? 0 : (distanceM - a.distanceM) / span
+        return a.terrainHeightM + (b.terrainHeightM - a.terrainHeightM) * t
+      }
+    }
+    return profile[profile.length - 1].terrainHeightM
+  }
 
   const buildPath = (key: 'terrainHeightM' | 'drillPathHeightM' | 'minRadiusHeightM') =>
     profile
@@ -87,6 +102,32 @@ export function SideViewPanel() {
             <path d={buildPath('minRadiusHeightM')} fill="none" stroke={colors.textPrimary} strokeOpacity={0.5} strokeDasharray="4 4" strokeWidth={1.25} />
             <path d={buildPath('terrainHeightM')} fill="none" stroke="#e2603f" strokeWidth={1.5} />
             <path d={buildPath('drillPathHeightM')} fill="none" stroke={colors.accentOrange} strokeWidth={3} strokeLinecap="round" />
+
+            {conflicts.map((c, i) => {
+              const cx = xScale(c.distanceM)
+              const cy = yScale(terrainHeightAt(c.distanceM) - c.utilityDepthM)
+              return (
+                <g key={i}>
+                  <line
+                    x1={cx}
+                    x2={cx}
+                    y1={yScale(terrainHeightAt(c.distanceM))}
+                    y2={cy}
+                    stroke={utilityColors[c.type]}
+                    strokeOpacity={0.5}
+                    strokeWidth={1}
+                  />
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={c.isConflict ? 5 : 3.5}
+                    fill={c.isConflict ? colors.accentRed : utilityColors[c.type]}
+                    stroke={colors.bgApp}
+                    strokeWidth={1.25}
+                  />
+                </g>
+              )
+            })}
 
             {hovered && (
               <>

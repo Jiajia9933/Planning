@@ -1,5 +1,5 @@
 import type { Feature, FeatureCollection, LineString } from 'geojson'
-import type { GeoPoint, UtilityType } from '../../types/hdd'
+import type { GeoPoint, UtilityType } from '../types/hdd'
 
 /**
  * Quadratic-bezier bow between two points so the drill route reads as a

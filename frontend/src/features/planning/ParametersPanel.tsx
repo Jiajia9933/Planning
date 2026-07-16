@@ -10,9 +10,12 @@ import {
   Typography,
 } from '@mui/material'
 import GpsFixedOutlinedIcon from '@mui/icons-material/GpsFixedOutlined'
-import { colors } from '../../theme/tokens'
+import { colors, utilityColors } from '../../theme/tokens'
 import { usePlanningStore } from '../../store/planningStore'
+import { mockUtilityLayers } from '../../data/mockPlanning'
 import type { DrillRig, PlanningParameters } from '../../types/hdd'
+
+const utilityLabels = Object.fromEntries(mockUtilityLayers.map((l) => [l.type, l.label]))
 
 const drillRigs: DrillRig[] = [
   'Vermeer D40x55',
@@ -40,6 +43,7 @@ function unitAdornment(unit: string) {
 export function ParametersPanel() {
   const parameters = usePlanningStore((s) => s.parameters)
   const result = usePlanningStore((s) => s.result)
+  const conflicts = usePlanningStore((s) => s.conflicts)
   const isCalculating = usePlanningStore((s) => s.isCalculating)
   const pointPickMode = usePlanningStore((s) => s.pointPickMode)
   const setParameter = usePlanningStore((s) => s.setParameter)
@@ -132,6 +136,14 @@ export function ParametersPanel() {
             slotProps={unitAdornment('°')}
             fullWidth
           />
+          <TextField
+            label="Sicherheitsabstand"
+            type="number"
+            value={parameters.safetyDistanceM}
+            onChange={(e) => update('safetyDistanceM', Number(e.target.value))}
+            slotProps={unitAdornment('m')}
+            fullWidth
+          />
 
           <Button
             variant="contained"
@@ -168,6 +180,50 @@ export function ParametersPanel() {
             ))}
           </Stack>
         )}
+      </Box>
+
+      <Divider sx={{ borderColor: colors.border }} />
+
+      <Box sx={{ p: 1.75 }}>
+        <Typography variant="caption" color={colors.textMuted} sx={{ fontWeight: 700, letterSpacing: 0.5 }}>
+          KOLLISIONSPRÜFUNG
+        </Typography>
+        <Stack spacing={1} sx={{ mt: 1.5 }}>
+          {conflicts.length === 0 ? (
+            <Typography variant="body2" color={colors.textSecondary}>
+              Keine Leitungskreuzungen im Bohrpfad.
+            </Typography>
+          ) : (
+            conflicts.map((c, i) => (
+              <Stack
+                key={i}
+                direction="row"
+                spacing={1}
+                sx={{ alignItems: 'flex-start' }}
+              >
+                <Box
+                  sx={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    mt: 0.4,
+                    flexShrink: 0,
+                    bgcolor: c.isConflict ? colors.accentRed : utilityColors[c.type],
+                  }}
+                />
+                <Typography
+                  variant="caption"
+                  color={c.isConflict ? colors.accentRed : colors.textSecondary}
+                  sx={{ fontWeight: c.isConflict ? 700 : 400 }}
+                >
+                  {c.isConflict ? '⚠ Konflikt mit ' : 'Kreuzung: '}
+                  {utilityLabels[c.type]} bei {c.distanceM.toFixed(1)} m — Abstand{' '}
+                  {c.clearanceM.toFixed(2)} m (erforderlich {parameters.safetyDistanceM.toFixed(2)} m)
+                </Typography>
+              </Stack>
+            ))
+          )}
+        </Stack>
       </Box>
     </Box>
   )
