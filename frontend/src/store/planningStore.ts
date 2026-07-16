@@ -1,7 +1,9 @@
 import { create } from 'zustand'
 import { mockPlanningParameters, mockUtilityLayers } from '../data/mockPlanning'
+import { PROJECT_CODE } from '../data/project'
 import { computePlanning } from '../domain/planningEngine'
 import { detectUtilityConflicts } from '../domain/conflictDetection'
+import { loadProject } from '../domain/projectStorage'
 import type { GeoPoint, PlanningParameters, PlanningResult, ProfileSample, UtilityCrossing } from '../types/hdd'
 
 export type PointKind = 'start' | 'end'
@@ -27,10 +29,13 @@ function runPlanning(parameters: PlanningParameters) {
   return { result, profile, conflicts }
 }
 
-const initialComputation = runPlanning(mockPlanningParameters)
+// A previously saved project (see domain/projectStorage.ts) takes over from
+// the mock fixture so a page reload doesn't lose the user's work.
+const initialParameters = loadProject(PROJECT_CODE)?.parameters ?? mockPlanningParameters
+const initialComputation = runPlanning(initialParameters)
 
 export const usePlanningStore = create<PlanningState>((set, get) => ({
-  parameters: mockPlanningParameters,
+  parameters: initialParameters,
   result: initialComputation.result,
   profile: initialComputation.profile,
   conflicts: initialComputation.conflicts,

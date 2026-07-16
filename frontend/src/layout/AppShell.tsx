@@ -1,4 +1,4 @@
-import { Box } from '@mui/material'
+import { Box, Snackbar } from '@mui/material'
 import styles from './AppShell.module.css'
 import { TopToolbar } from './TopToolbar'
 import { LeftNavRail } from './LeftNavRail'
@@ -8,16 +8,45 @@ import { SideViewPanel } from '../features/sideview/SideViewPanel'
 import { Viewer3DPanel } from '../features/viewer3d/Viewer3DPanel'
 import { Info3DPanel } from '../features/viewer3d/Info3DPanel'
 import { colors } from '../theme/tokens'
+import { PROJECT_NAME, PROJECT_CODE } from '../data/project'
+import { usePlanningStore } from '../store/planningStore'
+import { saveProject } from '../domain/projectStorage'
+import { downloadFile } from '../domain/fileDownload'
+import { buildReportHtml } from '../domain/reportGenerator'
+import { useToast } from '../hooks/useToast'
 
 export function AppShell() {
+  const parameters = usePlanningStore((s) => s.parameters)
+  const result = usePlanningStore((s) => s.result)
+  const profile = usePlanningStore((s) => s.profile)
+  const conflicts = usePlanningStore((s) => s.conflicts)
+  const { toast, showToast, closeToast } = useToast()
+
+  const handleSave = () => {
+    saveProject(PROJECT_CODE, parameters)
+    showToast('Projekt gespeichert')
+  }
+
+  const handleExport = () => {
+    const payload = { projectName: PROJECT_NAME, projectCode: PROJECT_CODE, parameters, result, profile, conflicts }
+    downloadFile(`${PROJECT_CODE}.json`, JSON.stringify(payload, null, 2), 'application/json')
+    showToast('Projekt exportiert')
+  }
+
+  const handleCreateReport = () => {
+    const html = buildReportHtml(PROJECT_NAME, PROJECT_CODE, parameters, result, conflicts)
+    downloadFile(`${PROJECT_CODE}-bericht.html`, html, 'text/html')
+    showToast('Bericht erstellt')
+  }
+
   return (
     <Box className={styles.shell} sx={{ color: colors.textPrimary, bgcolor: colors.bgApp }}>
       <TopToolbar
-        projectName="Neues Projekt"
-        projectCode="HDD-2024-05-23"
-        onSave={() => console.info('Speichern (Milestone 8 implementiert Persistenz)')}
-        onExport={() => console.info('Exportieren (Milestone 8 implementiert Persistenz)')}
-        onCreateReport={() => console.info('Bericht erstellen (Milestone 8 implementiert Persistenz)')}
+        projectName={PROJECT_NAME}
+        projectCode={PROJECT_CODE}
+        onSave={handleSave}
+        onExport={handleExport}
+        onCreateReport={handleCreateReport}
       />
 
       <LeftNavRail />
@@ -38,6 +67,14 @@ export function AppShell() {
       </Box>
 
       <Info3DPanel />
+
+      <Snackbar
+        open={!!toast}
+        autoHideDuration={2500}
+        onClose={closeToast}
+        message={toast?.message}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      />
     </Box>
   )
 }
