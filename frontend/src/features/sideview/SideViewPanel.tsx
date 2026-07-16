@@ -2,7 +2,8 @@ import { useMemo, useRef, useState } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { PanelFrame } from '../../layout/PanelFrame'
 import { colors, utilityColors } from '../../theme/tokens'
-import { mockProfile, mockUtilityLayers } from '../../data/mockPlanning'
+import { mockUtilityLayers } from '../../data/mockPlanning'
+import { usePlanningStore } from '../../store/planningStore'
 
 const WIDTH = 640
 const HEIGHT = 280
@@ -11,24 +12,26 @@ const PLOT_W = WIDTH - MARGIN.left - MARGIN.right
 const PLOT_H = HEIGHT - MARGIN.top - MARGIN.bottom
 
 export function SideViewPanel() {
+  const profile = usePlanningStore((s) => s.profile)
+  const minRadiusM = usePlanningStore((s) => s.result.minRadiusM)
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
 
   const { maxDistance, minHeight, maxHeight } = useMemo(() => {
-    const distances = mockProfile.map((p) => p.distanceM)
-    const heights = mockProfile.flatMap((p) => [p.terrainHeightM, p.drillPathHeightM, p.minRadiusHeightM])
+    const distances = profile.map((p) => p.distanceM)
+    const heights = profile.flatMap((p) => [p.terrainHeightM, p.drillPathHeightM, p.minRadiusHeightM])
     return {
       maxDistance: Math.max(...distances),
       minHeight: Math.min(...heights) - 2,
       maxHeight: Math.max(...heights) + 2,
     }
-  }, [])
+  }, [profile])
 
   const xScale = (d: number) => (d / maxDistance) * PLOT_W
   const yScale = (h: number) => PLOT_H - ((h - minHeight) / (maxHeight - minHeight)) * PLOT_H
 
   const buildPath = (key: 'terrainHeightM' | 'drillPathHeightM' | 'minRadiusHeightM') =>
-    mockProfile
+    profile
       .map((p, i) => `${i === 0 ? 'M' : 'L'} ${xScale(p.distanceM).toFixed(1)} ${yScale(p[key]).toFixed(1)}`)
       .join(' ')
 
@@ -39,7 +42,7 @@ export function SideViewPanel() {
     const distance = (relX / PLOT_W) * maxDistance
     let closest = 0
     let closestDelta = Infinity
-    mockProfile.forEach((p, i) => {
+    profile.forEach((p, i) => {
       const delta = Math.abs(p.distanceM - distance)
       if (delta < closestDelta) {
         closestDelta = delta
@@ -49,7 +52,7 @@ export function SideViewPanel() {
     setHoverIndex(closest)
   }
 
-  const hovered = hoverIndex !== null ? mockProfile[hoverIndex] : null
+  const hovered = hoverIndex !== null ? profile[hoverIndex] : null
   const yTicks = [30, 35, 40, 45, 50].filter((t) => t >= minHeight && t <= maxHeight)
   const xTicks = [0, 20, 40, 60, 80, 100, 120].filter((t) => t <= maxDistance + 5)
 
@@ -135,7 +138,7 @@ export function SideViewPanel() {
               Tiefe: {Math.abs(hovered.terrainHeightM - hovered.drillPathHeightM).toFixed(2)} m
             </Typography>
             <Typography variant="caption" color={colors.textSecondary} sx={{ display: 'block' }}>
-              Radius: {(30 + Math.sin(hoverIndex! / mockProfile.length * Math.PI) * 6).toFixed(2)} m
+              Radius: {minRadiusM.toFixed(2)} m
             </Typography>
           </Box>
         )}

@@ -1,15 +1,17 @@
-import { useState } from 'react'
 import {
   Box,
   Button,
   Divider,
+  IconButton,
   MenuItem,
   Stack,
   TextField,
+  Tooltip,
   Typography,
 } from '@mui/material'
+import GpsFixedOutlinedIcon from '@mui/icons-material/GpsFixedOutlined'
 import { colors } from '../../theme/tokens'
-import { mockPlanningParameters, mockPlanningResult } from '../../data/mockPlanning'
+import { usePlanningStore } from '../../store/planningStore'
 import type { DrillRig, PlanningParameters } from '../../types/hdd'
 
 const drillRigs: DrillRig[] = [
@@ -36,19 +38,16 @@ function unitAdornment(unit: string) {
 }
 
 export function ParametersPanel() {
-  const [params, setParams] = useState<PlanningParameters>(mockPlanningParameters)
-  const [isCalculating, setIsCalculating] = useState(false)
-  const result = mockPlanningResult
+  const parameters = usePlanningStore((s) => s.parameters)
+  const result = usePlanningStore((s) => s.result)
+  const isCalculating = usePlanningStore((s) => s.isCalculating)
+  const pointPickMode = usePlanningStore((s) => s.pointPickMode)
+  const setParameter = usePlanningStore((s) => s.setParameter)
+  const setPointPickMode = usePlanningStore((s) => s.setPointPickMode)
+  const calculate = usePlanningStore((s) => s.calculate)
 
   const update = <K extends keyof PlanningParameters>(key: K, value: PlanningParameters[K]) => {
-    setParams((prev) => ({ ...prev, [key]: value }))
-  }
-
-  const handleCalculate = () => {
-    setIsCalculating(true)
-    // Real geometry engine lands in Milestone 3; this just simulates latency
-    // so the button state and loading affordance are already production-shaped.
-    window.setTimeout(() => setIsCalculating(false), 600)
+    setParameter(key, value)
   }
 
   return (
@@ -76,22 +75,22 @@ export function ParametersPanel() {
         </Typography>
 
         <Stack spacing={1.5} sx={{ mt: 1.5 }}>
-          <TextField
+          <PointField
             label="Startpunkt"
-            value={formatPoint(params.startPoint.lat, params.startPoint.lng)}
-            slotProps={{ input: { readOnly: true } }}
-            fullWidth
+            value={formatPoint(parameters.startPoint.lat, parameters.startPoint.lng)}
+            active={pointPickMode === 'start'}
+            onPick={() => setPointPickMode(pointPickMode === 'start' ? null : 'start')}
           />
-          <TextField
+          <PointField
             label="Zielpunkt"
-            value={formatPoint(params.endPoint.lat, params.endPoint.lng)}
-            slotProps={{ input: { readOnly: true } }}
-            fullWidth
+            value={formatPoint(parameters.endPoint.lat, parameters.endPoint.lng)}
+            active={pointPickMode === 'end'}
+            onPick={() => setPointPickMode(pointPickMode === 'end' ? null : 'end')}
           />
           <TextField
             select
             label="Bohrgerät"
-            value={params.drillRig}
+            value={parameters.drillRig}
             onChange={(e) => update('drillRig', e.target.value as DrillRig)}
             fullWidth
           >
@@ -104,7 +103,7 @@ export function ParametersPanel() {
           <TextField
             label="Bohrdurchmesser"
             type="number"
-            value={params.pipeDiameterMm}
+            value={parameters.pipeDiameterMm}
             onChange={(e) => update('pipeDiameterMm', Number(e.target.value))}
             slotProps={unitAdornment('mm')}
             fullWidth
@@ -112,7 +111,7 @@ export function ParametersPanel() {
           <TextField
             label="Bohrradius (min.)"
             type="number"
-            value={params.minDrillRadiusM}
+            value={parameters.minDrillRadiusM}
             onChange={(e) => update('minDrillRadiusM', Number(e.target.value))}
             slotProps={unitAdornment('m')}
             fullWidth
@@ -120,7 +119,7 @@ export function ParametersPanel() {
           <TextField
             label="Eintrittswinkel"
             type="number"
-            value={params.entryAngleDeg}
+            value={parameters.entryAngleDeg}
             onChange={(e) => update('entryAngleDeg', Number(e.target.value))}
             slotProps={unitAdornment('°')}
             fullWidth
@@ -128,7 +127,7 @@ export function ParametersPanel() {
           <TextField
             label="Austrittswinkel"
             type="number"
-            value={params.exitAngleDeg}
+            value={parameters.exitAngleDeg}
             onChange={(e) => update('exitAngleDeg', Number(e.target.value))}
             slotProps={unitAdornment('°')}
             fullWidth
@@ -139,7 +138,7 @@ export function ParametersPanel() {
             size="large"
             fullWidth
             loading={isCalculating}
-            onClick={handleCalculate}
+            onClick={calculate}
           >
             Planung berechnen
           </Button>
@@ -160,8 +159,57 @@ export function ParametersPanel() {
           <ResultRow label="Eintrittspunkt" value={formatPoint(result.entryPoint.lat, result.entryPoint.lng)} />
           <ResultRow label="Austrittspunkt" value={formatPoint(result.exitPoint.lat, result.exitPoint.lng)} />
         </Stack>
+        {result.warnings.length > 0 && (
+          <Stack spacing={0.5} sx={{ mt: 1.5 }}>
+            {result.warnings.map((w) => (
+              <Typography key={w} variant="caption" color={colors.accentOrange}>
+                ⚠ {w}
+              </Typography>
+            ))}
+          </Stack>
+        )}
       </Box>
     </Box>
+  )
+}
+
+function PointField({
+  label,
+  value,
+  active,
+  onPick,
+}: {
+  label: string
+  value: string
+  active: boolean
+  onPick: () => void
+}) {
+  return (
+    <TextField
+      label={label}
+      value={value}
+      slotProps={{
+        input: {
+          readOnly: true,
+          endAdornment: (
+            <Tooltip title="Auf Karte anklicken zum Setzen">
+              <IconButton
+                size="small"
+                onClick={onPick}
+                sx={{
+                  color: active ? '#fff' : colors.textSecondary,
+                  bgcolor: active ? colors.accentBlue : 'transparent',
+                  '&:hover': { bgcolor: active ? colors.accentBlueHover : colors.bgElevated },
+                }}
+              >
+                <GpsFixedOutlinedIcon fontSize="inherit" sx={{ fontSize: 16 }} />
+              </IconButton>
+            </Tooltip>
+          ),
+        },
+      }}
+      fullWidth
+    />
   )
 }
 

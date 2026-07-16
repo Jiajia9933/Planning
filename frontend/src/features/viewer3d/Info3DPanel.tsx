@@ -1,6 +1,6 @@
 import { Box, Stack, Typography } from '@mui/material'
 import { colors, utilityColors } from '../../theme/tokens'
-import { mockPlanningParameters, mockPlanningResult } from '../../data/mockPlanning'
+import { usePlanningStore } from '../../store/planningStore'
 
 const crossSection = [
   { key: 'strom', label: 'Strom', distanceM: 1.2, angleDeg: -55 },
@@ -10,6 +10,9 @@ const crossSection = [
 ] as const
 
 export function Info3DPanel() {
+  const parameters = usePlanningStore((s) => s.parameters)
+  const result = usePlanningStore((s) => s.result)
+
   return (
     <Box
       sx={{
@@ -30,9 +33,9 @@ export function Info3DPanel() {
 
       <Box sx={{ p: 1.75, flex: 1 }}>
         <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'flex-end', mb: 2 }}>
-          <InfoStat label="Eintrittswinkel" value={`${mockPlanningParameters.entryAngleDeg}°`} align="left" />
-          <InfoStat label="Max. Tiefe" value={`${mockPlanningResult.maxDepthM.toFixed(2)} m`} align="center" />
-          <InfoStat label="Austrittswinkel" value={`${mockPlanningParameters.exitAngleDeg}°`} align="right" />
+          <InfoStat label="Eintrittswinkel" value={`${parameters.entryAngleDeg}°`} align="left" />
+          <InfoStat label="Max. Tiefe" value={`${result.maxDepthM.toFixed(2)} m`} align="center" />
+          <InfoStat label="Austrittswinkel" value={`${parameters.exitAngleDeg}°`} align="right" />
         </Stack>
 
         <Box sx={{ position: 'relative', width: '100%', aspectRatio: '1 / 1', maxWidth: 220, mx: 'auto' }}>
@@ -71,7 +74,7 @@ export function Info3DPanel() {
             }}
           >
             Bohrung
-            <br />Ø{mockPlanningParameters.pipeDiameterMm}mm
+            <br />Ø{parameters.pipeDiameterMm}mm
           </Typography>
 
           {crossSection.map((item) => {
