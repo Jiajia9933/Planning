@@ -3,7 +3,12 @@ import { haversineDistanceM } from '../../domain/geo'
 import type { GeoPoint } from '../../types/hdd'
 
 /** Bounding sphere + heading used to frame the project in an oblique 3D view. */
-export function computeCameraTarget(startPoint: GeoPoint, endPoint: GeoPoint, maxDepthM: number) {
+export function computeCameraTarget(
+  startPoint: GeoPoint,
+  endPoint: GeoPoint,
+  maxDepthM: number,
+  groundHeightM = 0,
+) {
   const centerLat = (startPoint.lat + endPoint.lat) / 2
   const centerLng = (startPoint.lng + endPoint.lng) / 2
   const distanceM = haversineDistanceM(startPoint, endPoint)
@@ -17,7 +22,7 @@ export function computeCameraTarget(startPoint: GeoPoint, endPoint: GeoPoint, ma
   const bearing = Math.atan2(y, x)
 
   return {
-    center: Cesium.Cartesian3.fromDegrees(centerLng, centerLat, -maxDepthM / 2),
+    center: Cesium.Cartesian3.fromDegrees(centerLng, centerLat, groundHeightM - maxDepthM / 2),
     radius,
     heading: bearing,
   }

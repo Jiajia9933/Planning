@@ -19,6 +19,7 @@ export function useCesiumViewer() {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const viewerRef = useRef<Cesium.Viewer | null>(null)
   const [viewer, setViewer] = useState<Cesium.Viewer | null>(null)
+  const [buildingsTileset, setBuildingsTileset] = useState<Cesium.Cesium3DTileset | null>(null)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -68,6 +69,7 @@ export function useCesiumViewer() {
         .then((tileset) => {
           if (disposed) return
           instance.scene.primitives.add(tileset)
+          setBuildingsTileset(tileset)
         })
         .catch((error: unknown) => console.error('Cesium OSM Buildings failed to load', error))
     } else {
@@ -88,8 +90,9 @@ export function useCesiumViewer() {
       instance.destroy()
       viewerRef.current = null
       setViewer(null)
+      setBuildingsTileset(null)
     }
   }, [])
 
-  return { containerRef, viewer }
+  return { containerRef, viewer, buildingsTileset }
 }

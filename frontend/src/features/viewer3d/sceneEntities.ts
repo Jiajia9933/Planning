@@ -25,6 +25,10 @@ const DRILL_SHAPE = circleShape(DRILL_RADIUS_M)
  * markers as Cesium entities. Called wholesale on every relevant state
  * change — the entity count here is small enough that a full rebuild is
  * simpler and cheap enough vs. diffing.
+ *
+ * `groundHeightM` is the real terrain elevation at the project site (0 when
+ * using the flat ellipsoid fallback) — see useGroundHeight for why every
+ * height below is `groundHeightM - depth` rather than just `-depth`.
  */
 export function rebuildSceneEntities(
   viewer: Cesium.Viewer,
@@ -32,17 +36,18 @@ export function rebuildSceneEntities(
   endPoint: GeoPoint,
   profile: ProfileSample[],
   conflicts: UtilityCrossing[],
+  groundHeightM: number,
 ) {
   viewer.entities.removeAll()
 
   const utilityTypes = mockUtilityLayers.map((l) => l.type)
   const utilities = buildUtilityLinesFeatureCollection(startPoint, endPoint, utilityTypes)
   for (const feature of utilities.features) {
-    const depth = utilityDepthsM[feature.properties.type]
+    const height = groundHeightM - utilityDepthsM[feature.properties.type]
     const [[lng1, lat1], [lng2, lat2]] = feature.geometry.coordinates as [number, number][]
     viewer.entities.add({
       polylineVolume: {
-        positions: Cesium.Cartesian3.fromDegreesArrayHeights([lng1, lat1, -depth, lng2, lat2, -depth]),
+        positions: Cesium.Cartesian3.fromDegreesArrayHeights([lng1, lat1, height, lng2, lat2, height]),
         shape: PIPE_SHAPE,
         material: Cesium.Color.fromCssColorString(utilityColors[feature.properties.type]),
       },
@@ -55,7 +60,7 @@ export function rebuildSceneEntities(
   routeCoords.forEach(([lng, lat], i) => {
     const sample = profile[i]
     const depth = sample ? sample.terrainHeightM - sample.drillPathHeightM : 0
-    flatPositions.push(lng, lat, -depth)
+    flatPositions.push(lng, lat, groundHeightM - depth)
   })
   viewer.entities.add({
     polylineVolume: {
@@ -65,12 +70,12 @@ export function rebuildSceneEntities(
     },
   })
 
-  viewer.entities.add(surfaceMarker(startPoint, 'Start', colors.accentGreen))
-  viewer.entities.add(surfaceMarker(endPoint, 'Ziel', colors.accentRed))
+  viewer.entities.add(surfaceMarker(startPoint, 'Start', colors.accentGreen, groundHeightM))
+  viewer.entities.add(surfaceMarker(endPoint, 'Ziel', colors.accentRed, groundHeightM))
 
   for (const c of conflicts) {
     const color = c.isConflict ? colors.accentRed : utilityColors[c.type]
-    const position = Cesium.Cartesian3.fromDegrees(c.point.lng, c.point.lat, -c.drillDepthM)
+    const position = Cesium.Cartesian3.fromDegrees(c.point.lng, c.point.lat, groundHeightM - c.drillDepthM)
     viewer.entities.add({
       position,
       point: {
@@ -95,10 +100,10 @@ export function rebuildSceneEntities(
         positions: Cesium.Cartesian3.fromDegreesArrayHeights([
           c.point.lng,
           c.point.lat,
-          0,
+          groundHeightM,
           c.point.lng,
           c.point.lat,
-          -c.drillDepthM,
+          groundHeightM - c.drillDepthM,
         ]),
         width: 1,
         material: new Cesium.PolylineDashMaterialProperty({
@@ -109,9 +114,9 @@ export function rebuildSceneEntities(
   }
 }
 
-function surfaceMarker(point: GeoPoint, text: string, color: string): Cesium.Entity.ConstructorOptions {
+function surfaceMarker(point: GeoPoint, text: string, color: string, groundHeightM: number): Cesium.Entity.ConstructorOptions {
   return {
-    position: Cesium.Cartesian3.fromDegrees(point.lng, point.lat, 0),
+    position: Cesium.Cartesian3.fromDegrees(point.lng, point.lat, groundHeightM),
     point: {
       pixelSize: 10,
       color: Cesium.Color.fromCssColorString(color),
