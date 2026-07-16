@@ -1,0 +1,37 @@
+/* Re-skins MapLibre's default (light) control chrome to match the app's dark theme. */
+.maplibregl-ctrl-group {
+  background: #0f151f;
+  border: 1px solid #1e2836;
+  box-shadow: none;
+}
+
+.maplibregl-ctrl-group button {
+  background: transparent;
+}
+
+.maplibregl-ctrl-group button + button {
+  border-top: 1px solid #1e2836;
+}
+
+.maplibregl-ctrl-group button:hover {
+  background: #161f2c;
+}
+
+.maplibregl-ctrl-icon {
+  filter: invert(1) brightness(1.6);
+}
+
+.maplibregl-ctrl-attrib {
+  background: rgba(15, 21, 31, 0.72);
+  color: #8892a0;
+}
+
+.maplibregl-ctrl-attrib a {
+  color: #8892a0;
+}
+
+.maplibregl-ctrl-scale {
+  background: rgba(15, 21, 31, 0.72);
+  border-color: #e8ecf1;
+  color: #e8ecf1;
+}
