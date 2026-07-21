@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   Box,
   Button,
@@ -14,16 +15,12 @@ import { colors, utilityColors } from '../../theme/tokens'
 import { usePlanningStore } from '../../store/planningStore'
 import { mockUtilityLayers } from '../../data/mockPlanning'
 import { isResolved } from '@hdd-planner/domain'
+import { optimizeRoute } from '../../domain/routeOptimizer'
 import type { DrillRig, PlanningParameters } from '../../types/hdd'
 
 const utilityLabels = Object.fromEntries(mockUtilityLayers.map((l) => [l.type, l.label]))
 
-const drillRigs: DrillRig[] = [
-  'Vermeer D40x55',
-  'Vermeer D24x40',
-  'Ditch Witch JT30',
-  'Herrenknecht HK50',
-]
+const drillRigs: DrillRig[] = ['Bohrgerät1', 'Bohrgerät2', 'Bohrgerät3', 'Bohrgerät4']
 
 function formatPoint(lat: number, lng: number) {
   return `${lat.toFixed(6)}, ${lng.toFixed(6)}`
@@ -48,15 +45,26 @@ export function ParametersPanel() {
   const conflicts = usePlanningStore((s) => s.conflicts)
   const isCalculating = usePlanningStore((s) => s.isCalculating)
   const pointPickMode = usePlanningStore((s) => s.pointPickMode)
+  const uploadedParcels = usePlanningStore((s) => s.uploadedParcels)
   const setParameter = usePlanningStore((s) => s.setParameter)
   const setPointPickMode = usePlanningStore((s) => s.setPointPickMode)
+  const setWaypoints = usePlanningStore((s) => s.setWaypoints)
   const calculate = usePlanningStore((s) => s.calculate)
+
+  const [optimizeInfo, setOptimizeInfo] = useState<{ crossedParcelCount: number; warnings: string[] } | null>(null)
 
   const update = <K extends keyof PlanningParameters>(key: K, value: PlanningParameters[K]) => {
     setParameter(key, value)
   }
 
   const resolved = isResolved(parameters)
+
+  const handleOptimizeRoute = () => {
+    if (!parameters.startPoint || !parameters.endPoint) return
+    const result = optimizeRoute(parameters.startPoint, parameters.endPoint, uploadedParcels, parameters.minDrillRadiusM)
+    setWaypoints(result.waypoints)
+    setOptimizeInfo({ crossedParcelCount: result.crossedParcelCount, warnings: result.warnings })
+  }
   // `profile` empty covers both "points not set" and "set but not yet
   // calculated" — ERGEBNISSE/KOLLISIONSPRÜFUNG only ever show real,
   // server-computed numbers, never the inert placeholder.
@@ -152,6 +160,29 @@ export function ParametersPanel() {
             slotProps={unitAdornment('m')}
             fullWidth
           />
+
+          <Button
+            variant="outlined"
+            fullWidth
+            disabled={!resolved}
+            onClick={handleOptimizeRoute}
+          >
+            Route optimieren
+          </Button>
+          {optimizeInfo && (
+            <Stack spacing={0.5}>
+              <Typography variant="caption" color={colors.textSecondary}>
+                {optimizeInfo.crossedParcelCount === 0
+                  ? 'Route kreuzt keine Flurstücke.'
+                  : `Route kreuzt noch ${optimizeInfo.crossedParcelCount} Flurstück${optimizeInfo.crossedParcelCount > 1 ? 'e' : ''}.`}
+              </Typography>
+              {optimizeInfo.warnings.map((w) => (
+                <Typography key={w} variant="caption" color={colors.accentOrange}>
+                  ⚠ {w}
+                </Typography>
+              ))}
+            </Stack>
+          )}
 
           <Button
             variant="contained"

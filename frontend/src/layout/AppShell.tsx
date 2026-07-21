@@ -8,10 +8,11 @@ import { SideViewPanel } from '../features/sideview/SideViewPanel'
 import { Viewer3DPanel } from '../features/viewer3d/Viewer3DPanel'
 import { Info3DPanel } from '../features/viewer3d/Info3DPanel'
 import { DatenPanel } from '../features/daten/DatenPanel'
+import { ProjektPanel } from '../features/projects/ProjektPanel'
+import { BerichtePanel } from '../features/berichte/BerichtePanel'
 import { colors } from '../theme/tokens'
 import { usePlanningStore } from '../store/planningStore'
 import { downloadFile } from '../domain/fileDownload'
-import { buildReportHtml } from '../domain/reportGenerator'
 import { useToast } from '../hooks/useToast'
 
 export function AppShell() {
@@ -22,8 +23,10 @@ export function AppShell() {
   const profile = usePlanningStore((s) => s.profile)
   const conflicts = usePlanningStore((s) => s.conflicts)
   const activeNavId = usePlanningStore((s) => s.activeNavId)
+  const currentProjectId = usePlanningStore((s) => s.currentProjectId)
   const isSaving = usePlanningStore((s) => s.isSaving)
   const saveParameters = usePlanningStore((s) => s.saveParameters)
+  const createReport = usePlanningStore((s) => s.createReport)
   const { toast, showToast, closeToast } = useToast()
 
   const handleSave = async () => {
@@ -41,10 +44,13 @@ export function AppShell() {
     showToast('Projekt exportiert')
   }
 
-  const handleCreateReport = () => {
-    const html = buildReportHtml(projectName, projectCode, parameters, result, conflicts)
-    downloadFile(`${projectCode}-bericht.html`, html, 'text/html')
-    showToast('Bericht erstellt')
+  const handleCreateReport = async () => {
+    try {
+      await createReport()
+      showToast('Bericht erstellt und in Berichte gespeichert')
+    } catch {
+      showToast('Bericht konnte nicht erstellt werden')
+    }
   }
 
   return (
@@ -55,7 +61,7 @@ export function AppShell() {
         onSave={() => void handleSave()}
         isSaving={isSaving}
         onExport={handleExport}
-        onCreateReport={handleCreateReport}
+        onCreateReport={() => void handleCreateReport()}
       />
 
       <LeftNavRail />
@@ -63,6 +69,14 @@ export function AppShell() {
       {activeNavId === 'daten' ? (
         <Box className={styles.dataPage}>
           <DatenPanel />
+        </Box>
+      ) : activeNavId === 'projekt' || !currentProjectId ? (
+        <Box className={styles.dataPage}>
+          <ProjektPanel />
+        </Box>
+      ) : activeNavId === 'berichte' ? (
+        <Box className={styles.dataPage}>
+          <BerichtePanel />
         </Box>
       ) : (
         <>

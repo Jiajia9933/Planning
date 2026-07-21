@@ -8,7 +8,6 @@ import { LoginPage } from './features/auth/LoginPage'
 import { RegisterPage } from './features/auth/RegisterPage'
 import { ForgotPasswordPage } from './features/auth/ForgotPasswordPage'
 import { ResetPasswordPage } from './features/auth/ResetPasswordPage'
-import { CreateProjectPage } from './features/auth/CreateProjectPage'
 import { usePlanningStore } from './store/planningStore'
 
 function LoadingScreen() {
@@ -67,7 +66,6 @@ function AuthenticatedApp() {
   }, [])
 
   if (planningStatus === 'idle' || planningStatus === 'loading') return <LoadingScreen />
-  if (planningStatus === 'no-project') return <CreateProjectPage />
   if (planningStatus === 'error') return <ErrorScreen />
 
   return <AppShell />

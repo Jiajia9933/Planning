@@ -196,6 +196,12 @@ export function MapPanel() {
     if (bounds) map.fitBounds(bounds, { padding: 56, duration: 800 })
   }
 
+  const handleLocateParcels = () => {
+    if (!map) return
+    const bounds = featureCollectionBounds(uploadedParcels)
+    if (bounds) map.fitBounds(bounds, { padding: 56, duration: 800 })
+  }
+
   // Start/Ziel markers are DOM overlays maintained by the Map instance itself
   // (unaffected by setStyle). Each is gated on its own point independently —
   // placing only Startpunkt should show just that marker, not wait for Ziel too.
@@ -608,12 +614,21 @@ export function MapPanel() {
               />
             ))}
           </Stack>
-          <FormControlLabel
-            sx={legendRowSx}
-            slotProps={{ typography: { variant: 'caption' } }}
-            control={<Checkbox size="small" sx={legendCheckboxSx} checked={showParcels} onChange={(_, c) => setShowParcels(c)} />}
-            label="Flurstücksgrenzen"
-          />
+          <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
+            <FormControlLabel
+              sx={legendRowSx}
+              slotProps={{ typography: { variant: 'caption' } }}
+              control={<Checkbox size="small" sx={legendCheckboxSx} checked={showParcels} onChange={(_, c) => setShowParcels(c)} />}
+              label="Flurstücksgrenzen"
+            />
+            {uploadedParcels && (
+              <Tooltip title="Zu den Flurstücken springen">
+                <IconButton size="small" onClick={handleLocateParcels} sx={{ color: colors.textSecondary }}>
+                  <CenterFocusStrongOutlinedIcon fontSize="inherit" sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Stack>
           <FormControlLabel
             sx={legendRowSx}
             slotProps={{ typography: { variant: 'caption' } }}

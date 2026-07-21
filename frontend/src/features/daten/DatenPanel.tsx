@@ -10,6 +10,8 @@ import { guessUtilityType, buildUploadedFeatureCollection } from '../../domain/s
 import type { ImportedLayerInfo, LayerAssignment, SpartenplanImportResult } from '../../domain/spartenplan/types'
 import { parseParcelShapefileZip } from '../../domain/flurstuecke/shapefileImport'
 import type { ParcelFeatureCollection } from '../../domain/flurstuecke/shapefileImport'
+import { isValidWgs84, reprojectFeatures } from '../../domain/reproject'
+import { CrsPicker } from './CrsPicker'
 import type { UtilityType } from '../../types/hdd'
 
 const utilityLabels = Object.fromEntries(mockUtilityLayers.map((l) => [l.type, l.label])) as Record<
@@ -32,12 +34,23 @@ export function DatenPanel() {
   const [parseError, setParseError] = useState<string | null>(null)
   const [pendingFileName, setPendingFileName] = useState<string | null>(null)
   const [pendingImport, setPendingImport] = useState<SpartenplanImportResult | null>(null)
+  const [pendingImportUnprojected, setPendingImportUnprojected] = useState<SpartenplanImportResult | null>(null)
   const [assignments, setAssignments] = useState<Record<string, LayerAssignment>>({})
 
   const [isParsingParcels, setIsParsingParcels] = useState(false)
   const [parcelsParseError, setParcelsParseError] = useState<string | null>(null)
   const [pendingParcelsFileName, setPendingParcelsFileName] = useState<string | null>(null)
   const [pendingParcels, setPendingParcels] = useState<ParcelFeatureCollection | null>(null)
+  const [pendingParcelsUnprojected, setPendingParcelsUnprojected] = useState<ParcelFeatureCollection | null>(null)
+
+  const applySpartenResult = (result: SpartenplanImportResult) => {
+    const initialAssignments: Record<string, LayerAssignment> = {}
+    for (const layer of result.layers) {
+      initialAssignments[layer.id] = guessUtilityType(layer.sourceName) ?? 'ignore'
+    }
+    setPendingImport(result)
+    setAssignments(initialAssignments)
+  }
 
   const handleFileSelect = async (file: File) => {
     setParseError(null)
@@ -48,18 +61,23 @@ export function DatenPanel() {
         setParseError('Keine Leitungen (LineString) in dieser Datei gefunden.')
         return
       }
-      const initialAssignments: Record<string, LayerAssignment> = {}
-      for (const layer of result.layers) {
-        initialAssignments[layer.id] = guessUtilityType(layer.sourceName) ?? 'ignore'
-      }
-      setPendingImport(result)
-      setAssignments(initialAssignments)
       setPendingFileName(file.name)
+      if (isValidWgs84(result.rawFeatures)) {
+        applySpartenResult(result)
+      } else {
+        setPendingImportUnprojected(result)
+      }
     } catch (err) {
       setParseError(err instanceof Error ? err.message : 'Datei konnte nicht gelesen werden.')
     } finally {
       setIsParsing(false)
     }
+  }
+
+  const handleApplySpartenCrs = (code: string) => {
+    if (!pendingImportUnprojected) return
+    applySpartenResult({ ...pendingImportUnprojected, rawFeatures: reprojectFeatures(pendingImportUnprojected.rawFeatures, code) })
+    setPendingImportUnprojected(null)
   }
 
   const handleCommit = async () => {
@@ -98,13 +116,23 @@ export function DatenPanel() {
         setParcelsParseError('Keine Flurstücke (Polygon) in dieser Datei gefunden.')
         return
       }
-      setPendingParcels(featureCollection)
       setPendingParcelsFileName(file.name)
+      if (isValidWgs84(featureCollection.features)) {
+        setPendingParcels(featureCollection)
+      } else {
+        setPendingParcelsUnprojected(featureCollection)
+      }
     } catch (err) {
       setParcelsParseError(err instanceof Error ? err.message : 'Datei konnte nicht gelesen werden.')
     } finally {
       setIsParsingParcels(false)
     }
+  }
+
+  const handleApplyParcelsCrs = (code: string) => {
+    if (!pendingParcelsUnprojected) return
+    setPendingParcels({ ...pendingParcelsUnprojected, features: reprojectFeatures(pendingParcelsUnprojected.features, code) })
+    setPendingParcelsUnprojected(null)
   }
 
   const handleCommitParcels = async () => {
@@ -216,6 +244,8 @@ export function DatenPanel() {
           )}
         </Stack>
 
+        {pendingImportUnprojected && <CrsPicker onApply={handleApplySpartenCrs} />}
+
         {pendingImport && (
           <Box sx={{ mt: 3 }}>
             <Typography variant="caption" color={colors.textMuted} sx={{ fontWeight: 700, letterSpacing: 0.5 }}>
@@ -299,6 +329,8 @@ export function DatenPanel() {
             </Typography>
           )}
         </Stack>
+
+        {pendingParcelsUnprojected && <CrsPicker onApply={handleApplyParcelsCrs} />}
 
         {pendingParcels && (
           <Box sx={{ mt: 3 }}>

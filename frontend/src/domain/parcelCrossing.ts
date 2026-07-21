@@ -8,7 +8,7 @@ export interface CrossedParcel {
 }
 
 /** Ray-casting point-in-polygon test against a single ring. */
-function pointInRing(point: Coord, ring: Coord[]): boolean {
+export function pointInRing(point: Coord, ring: Coord[]): boolean {
   let inside = false
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     const [xi, yi] = ring[i]
@@ -28,7 +28,7 @@ function pointInPolygon(point: Coord, rings: Coord[][]): boolean {
   return true
 }
 
-function segmentCrossesRing(a1: Coord, a2: Coord, ring: Coord[]): boolean {
+export function segmentCrossesRing(a1: Coord, a2: Coord, ring: Coord[]): boolean {
   for (let i = 0; i < ring.length - 1; i++) {
     if (segmentIntersection(a1, a2, ring[i], ring[i + 1])) return true
   }

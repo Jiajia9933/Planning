@@ -2,7 +2,8 @@ import { create } from 'zustand'
 import type { FeatureCollection, LineString } from 'geojson'
 import { mockPlanningParameters } from '../data/mockPlanning'
 import { buildRoutePoints, insertPointAtBestIndex, isResolved } from '@hdd-planner/domain'
-import { apiFetch, ApiError } from '../features/auth/api'
+import { apiFetch, apiFetchBlob } from '../features/auth/api'
+import { buildReportPdf } from '../domain/reportPdf'
 import type { SpartenplanMeta } from '../domain/spartenplan/types'
 import type { ParcelFeatureCollection } from '../domain/flurstuecke/shapefileImport'
 import type { ParcelsMeta } from '../domain/flurstuecke/types'
@@ -16,21 +17,46 @@ import type {
 } from '../types/hdd'
 
 export type PointKind = 'start' | 'end'
-export type BootstrapStatus = 'idle' | 'loading' | 'ready' | 'no-project' | 'error'
+export type BootstrapStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 type UploadedSpartenplan = FeatureCollection<LineString, { type: UtilityType }> | null
 
+/** Lightweight — the Projekt picker list doesn't need full parameters per project. */
+export interface ProjectSummary {
+  id: string
+  name: string
+  code: string
+  updatedAt: string
+}
+
 interface ProjectPayload {
+  id: string
   name: string
   code: string
   parameters: PlanningParameters
 }
 
-interface BootstrapPayload {
+interface ProjectListPayload {
+  projects: ProjectSummary[]
+}
+
+interface ProjectDetailPayload {
   project: ProjectPayload
   spartenplan: { featureCollection: UploadedSpartenplan; meta: SpartenplanMeta } | null
   parcels: { featureCollection: ParcelFeatureCollection; meta: ParcelsMeta } | null
 }
+
+export interface ReportSummary {
+  id: string
+  projectName: string
+  createdAt: string
+}
+
+// Remembers which project to reopen on the next visit — purely a UX
+// convenience (skip the picker for a returning single/multi-project user),
+// never trusted as an access-control decision (the backend re-checks
+// ownership on every request regardless).
+const LAST_PROJECT_ID_KEY = 'hdd-planner:lastProjectId'
 
 interface CalculatePayload {
   result: PlanningResult
@@ -54,6 +80,8 @@ const placeholderResult: PlanningResult = {
 
 interface PlanningState {
   status: BootstrapStatus
+  projects: ProjectSummary[]
+  currentProjectId: string | null
   projectName: string
   projectCode: string
   parameters: PlanningParameters
@@ -71,14 +99,17 @@ interface PlanningState {
   /** Real per-route-point terrain elevation, pushed in by Viewer3DPanel's Cesium terrain sampling. Null until sampled (or when no Ion terrain is available) — calculate() falls back to the synthetic profile shape in that case. */
   terrainElevationsM: number[] | null
   terrainSource: 'real' | 'synthetic'
+  reports: ReportSummary[]
 
   bootstrap: () => Promise<void>
+  openProject: (id: string) => Promise<void>
   createProject: (name: string) => Promise<void>
   setParameter: <K extends keyof PlanningParameters>(key: K, value: PlanningParameters[K]) => void
   setPoint: (kind: PointKind, point: GeoPoint) => void
   addWaypoint: (point: GeoPoint) => void
   moveWaypoint: (index: number, point: GeoPoint) => void
   removeWaypoint: (index: number) => void
+  setWaypoints: (waypoints: GeoPoint[]) => void
   setPointPickMode: (mode: PointKind | null) => void
   setActiveNavId: (id: string) => void
   saveParameters: () => Promise<void>
@@ -88,10 +119,15 @@ interface PlanningState {
   clearUploadedParcels: () => Promise<void>
   setTerrainElevations: (elevationsM: number[] | null) => void
   calculate: () => Promise<void>
+  createReport: () => Promise<void>
+  loadReports: () => Promise<void>
+  downloadReport: (reportId: string) => Promise<void>
 }
 
 export const usePlanningStore = create<PlanningState>((set, get) => ({
   status: 'idle',
+  projects: [],
+  currentProjectId: null,
   projectName: '',
   projectCode: '',
   parameters: mockPlanningParameters,
@@ -108,43 +144,62 @@ export const usePlanningStore = create<PlanningState>((set, get) => ({
   parcelsMeta: null,
   terrainElevationsM: null,
   terrainSource: 'synthetic',
+  reports: [],
 
+  // Fetches the user's project list, then decides whether to open one
+  // automatically (see LAST_PROJECT_ID_KEY / single-project cases) or leave
+  // currentProjectId null so AppShell shows the Projekt picker.
   bootstrap: async () => {
     set({ status: 'loading' })
     try {
-      const data = await apiFetch<BootstrapPayload>('/api/projects/me')
-      set({
-        status: 'ready',
-        projectName: data.project.name,
-        projectCode: data.project.code,
-        parameters: data.project.parameters,
-        uploadedSpartenplan: data.spartenplan?.featureCollection ?? null,
-        spartenplanMeta: data.spartenplan?.meta ?? null,
-        uploadedParcels: data.parcels?.featureCollection ?? null,
-        parcelsMeta: data.parcels?.meta ?? null,
-      })
-      if (isResolved(data.project.parameters)) {
-        await get().calculate()
-      }
-    } catch (err) {
-      set({ status: err instanceof ApiError && err.status === 404 ? 'no-project' : 'error' })
+      const data = await apiFetch<ProjectListPayload>('/api/projects')
+      set({ status: 'ready', projects: data.projects })
+
+      const rememberedId = localStorage.getItem(LAST_PROJECT_ID_KEY)
+      const toOpen =
+        (rememberedId && data.projects.find((p) => p.id === rememberedId)?.id) ??
+        (data.projects.length === 1 ? data.projects[0].id : null)
+      if (toOpen) await get().openProject(toOpen)
+    } catch {
+      set({ status: 'error' })
     }
   },
 
-  createProject: async (name) => {
-    const data = await apiFetch<{ project: ProjectPayload }>('/api/projects/me', {
-      method: 'POST',
-      body: { name },
-    })
+  openProject: async (id) => {
+    const data = await apiFetch<ProjectDetailPayload>(`/api/projects/${id}`)
+    localStorage.setItem(LAST_PROJECT_ID_KEY, id)
     set({
-      status: 'ready',
+      currentProjectId: data.project.id,
       projectName: data.project.name,
       projectCode: data.project.code,
       parameters: data.project.parameters,
+      uploadedSpartenplan: data.spartenplan?.featureCollection ?? null,
+      spartenplanMeta: data.spartenplan?.meta ?? null,
+      uploadedParcels: data.parcels?.featureCollection ?? null,
+      parcelsMeta: data.parcels?.meta ?? null,
+      result: placeholderResult,
+      profile: [],
+      conflicts: [],
+      terrainSource: 'synthetic',
+      activeNavId: get().activeNavId === 'projekt' ? 'karte' : get().activeNavId,
     })
     if (isResolved(data.project.parameters)) {
       await get().calculate()
     }
+  },
+
+  createProject: async (name) => {
+    const data = await apiFetch<{ project: ProjectPayload }>('/api/projects', {
+      method: 'POST',
+      body: { name },
+    })
+    set((state) => ({
+      projects: [
+        { id: data.project.id, name: data.project.name, code: data.project.code, updatedAt: new Date().toISOString() },
+        ...state.projects,
+      ],
+    }))
+    await get().openProject(data.project.id)
   },
 
   setParameter: (key, value) =>
@@ -189,22 +244,34 @@ export const usePlanningStore = create<PlanningState>((set, get) => ({
       }
     }),
 
+  // Bulk-replace, unlike the single-point add/move/remove above — used by
+  // "Route optimieren" to hand over its whole proposed waypoint sequence.
+  setWaypoints: (waypoints) =>
+    set((state) => {
+      if (!isResolved(state.parameters)) return state
+      return { parameters: { ...state.parameters, waypoints } }
+    }),
+
   setPointPickMode: (mode) => set({ pointPickMode: mode }),
 
   setActiveNavId: (id) => set({ activeNavId: id }),
 
   saveParameters: async () => {
+    const projectId = get().currentProjectId
+    if (!projectId) return
     set({ isSaving: true })
     try {
-      await apiFetch('/api/projects/me/parameters', { method: 'PUT', body: get().parameters })
+      await apiFetch(`/api/projects/${projectId}/parameters`, { method: 'PUT', body: get().parameters })
     } finally {
       set({ isSaving: false })
     }
   },
 
   setUploadedSpartenplan: async (fc, meta) => {
+    const projectId = get().currentProjectId
+    if (!projectId) return
     const data = await apiFetch<{ spartenplan: { featureCollection: UploadedSpartenplan; meta: SpartenplanMeta } }>(
-      '/api/projects/me/spartenplan',
+      `/api/projects/${projectId}/spartenplan`,
       { method: 'PUT', body: { featureCollection: fc, meta } },
     )
     set({ uploadedSpartenplan: data.spartenplan.featureCollection, spartenplanMeta: data.spartenplan.meta })
@@ -214,7 +281,9 @@ export const usePlanningStore = create<PlanningState>((set, get) => ({
   },
 
   clearUploadedSpartenplan: async () => {
-    await apiFetch('/api/projects/me/spartenplan', { method: 'DELETE' })
+    const projectId = get().currentProjectId
+    if (!projectId) return
+    await apiFetch(`/api/projects/${projectId}/spartenplan`, { method: 'DELETE' })
     set({ uploadedSpartenplan: null, spartenplanMeta: null })
     if (isResolved(get().parameters)) {
       await get().calculate()
@@ -222,15 +291,19 @@ export const usePlanningStore = create<PlanningState>((set, get) => ({
   },
 
   setUploadedParcels: async (fc, meta) => {
+    const projectId = get().currentProjectId
+    if (!projectId) return
     const data = await apiFetch<{ parcels: { featureCollection: ParcelFeatureCollection; meta: ParcelsMeta } }>(
-      '/api/projects/me/parcels',
+      `/api/projects/${projectId}/parcels`,
       { method: 'PUT', body: { featureCollection: fc, meta } },
     )
     set({ uploadedParcels: data.parcels.featureCollection, parcelsMeta: data.parcels.meta })
   },
 
   clearUploadedParcels: async () => {
-    await apiFetch('/api/projects/me/parcels', { method: 'DELETE' })
+    const projectId = get().currentProjectId
+    if (!projectId) return
+    await apiFetch(`/api/projects/${projectId}/parcels`, { method: 'DELETE' })
     set({ uploadedParcels: null, parcelsMeta: null })
   },
 
@@ -256,4 +329,52 @@ export const usePlanningStore = create<PlanningState>((set, get) => ({
       set({ isCalculating: false })
     }
   },
+
+  createReport: async () => {
+    const { currentProjectId, projectName, projectCode, parameters, result, conflicts } = get()
+    if (!currentProjectId) return
+    const pdfBlob = buildReportPdf(projectName, projectCode, parameters, result, conflicts)
+    const fileBase64 = await blobToBase64(pdfBlob)
+    const data = await apiFetch<{ report: ReportSummary }>(`/api/projects/${currentProjectId}/reports`, {
+      method: 'POST',
+      body: { projectName, fileBase64 },
+    })
+    set((state) => ({ reports: [data.report, ...state.reports] }))
+    triggerBlobDownload(pdfBlob, `${projectName}-bericht.pdf`)
+  },
+
+  loadReports: async () => {
+    const projectId = get().currentProjectId
+    if (!projectId) return
+    const data = await apiFetch<{ reports: ReportSummary[] }>(`/api/projects/${projectId}/reports`)
+    set({ reports: data.reports })
+  },
+
+  downloadReport: async (reportId) => {
+    const projectId = get().currentProjectId
+    if (!projectId) return
+    const report = get().reports.find((r) => r.id === reportId)
+    const blob = await apiFetchBlob(`/api/projects/${projectId}/reports/${reportId}`)
+    triggerBlobDownload(blob, `${report?.projectName ?? 'bericht'}-bericht.pdf`)
+  },
 }))
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve((reader.result as string).split(',')[1])
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
+}
+
+function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}

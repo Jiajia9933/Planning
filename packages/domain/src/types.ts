@@ -9,10 +9,10 @@ export interface GeoPoint {
 }
 
 export type DrillRig =
-  | 'Vermeer D40x55'
-  | 'Vermeer D24x40'
-  | 'Ditch Witch JT30'
-  | 'Herrenknecht HK50'
+  | 'Bohrgerät1'
+  | 'Bohrgerät2'
+  | 'Bohrgerät3'
+  | 'Bohrgerät4'
 
 export interface PlanningParameters {
   /** Null until the Bauleiter places it on the map — a new project starts empty, not at a fake default location. */

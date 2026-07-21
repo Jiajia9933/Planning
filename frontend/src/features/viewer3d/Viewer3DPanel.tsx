@@ -126,7 +126,7 @@ export function Viewer3DPanel() {
   useEffect(() => {
     if (!viewer) return
     if (startPoint && endPoint) {
-      rebuildSceneEntities(viewer, startPoint, endPoint, waypoints, profile, conflicts, groundHeightM, utilities)
+      rebuildSceneEntities(viewer, startPoint, endPoint, waypoints, profile, conflicts, groundHeightM, utilities, terrainElevationsM)
     } else {
       viewer.entities.removeAll()
       viewer.scene.requestRender()
@@ -136,7 +136,7 @@ export function Viewer3DPanel() {
       flyToInitialView()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer, startPoint, endPoint, waypoints, profile, conflicts, groundHeightM, utilities])
+  }, [viewer, startPoint, endPoint, waypoints, profile, conflicts, groundHeightM, utilities, terrainElevationsM])
 
   useEffect(() => {
     if (!viewer) return

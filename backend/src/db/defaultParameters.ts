@@ -10,7 +10,7 @@ export const defaultParameters: PlanningParameters = {
   startPoint: null,
   endPoint: null,
   waypoints: [],
-  drillRig: 'Vermeer D40x55',
+  drillRig: 'Bohrgerät1',
   pipeDiameterMm: 160,
   minDrillRadiusM: 30,
   entryAngleDeg: 12,

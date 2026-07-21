@@ -25,9 +25,15 @@ const DRILL_SHAPE = circleShape(DRILL_RADIUS_M)
  * change — the entity count here is small enough that a full rebuild is
  * simpler and cheap enough vs. diffing.
  *
- * `groundHeightM` is the real terrain elevation at the project site (0 when
- * using the flat ellipsoid fallback) — see useGroundHeight for why every
- * height below is `groundHeightM - depth` rather than just `-depth`.
+ * `groundHeightM` is a single real terrain sample at the project's center
+ * point (0 when using the flat ellipsoid fallback) — the fallback anchor
+ * for anything that isn't per-point sampled (utilities, conflict markers).
+ * `terrainElevationsM`, when available, is real elevation at each of the
+ * drill route's own 33 sample points (see useTerrainProfile) — using it
+ * instead of the single flat sample for the drill path and Start/Ziel
+ * markers means they sit on the *actual* ground at their own location
+ * rather than all assuming the center point's elevation, which is wrong
+ * wherever the site isn't flat.
  */
 export function rebuildSceneEntities(
   viewer: Cesium.Viewer,
@@ -38,6 +44,7 @@ export function rebuildSceneEntities(
   conflicts: UtilityCrossing[],
   groundHeightM: number,
   utilities: FeatureCollection<LineString, { type: UtilityType }>,
+  terrainElevationsM: number[] | null,
 ) {
   viewer.entities.removeAll()
 
@@ -60,7 +67,8 @@ export function rebuildSceneEntities(
   routeCoords.forEach(([lng, lat], i) => {
     const sample = profile[i]
     const depth = sample ? sample.terrainHeightM - sample.drillPathHeightM : 0
-    flatPositions.push(lng, lat, groundHeightM - depth)
+    const anchorHeightM = terrainElevationsM?.[i] ?? groundHeightM
+    flatPositions.push(lng, lat, anchorHeightM - depth)
   })
   viewer.entities.add({
     polylineVolume: {
@@ -70,8 +78,10 @@ export function rebuildSceneEntities(
     },
   })
 
-  viewer.entities.add(surfaceMarker(startPoint, 'Start', colors.accentGreen, groundHeightM))
-  viewer.entities.add(surfaceMarker(endPoint, 'Ziel', colors.accentRed, groundHeightM))
+  const startHeightM = terrainElevationsM?.[0] ?? groundHeightM
+  const endHeightM = terrainElevationsM?.[terrainElevationsM.length - 1] ?? groundHeightM
+  viewer.entities.add(surfaceMarker(startPoint, 'Start', colors.accentGreen, startHeightM))
+  viewer.entities.add(surfaceMarker(endPoint, 'Ziel', colors.accentRed, endHeightM))
 
   for (const c of conflicts) {
     const color = c.isConflict ? colors.accentRed : utilityColors[c.type]
