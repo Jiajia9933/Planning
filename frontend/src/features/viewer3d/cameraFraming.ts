@@ -1,6 +1,7 @@
 import * as Cesium from 'cesium'
-import { haversineDistanceM } from '../../domain/geo'
-import type { GeoPoint } from '../../types/hdd'
+import { haversineDistanceM } from '@hdd-planner/domain'
+import type { GeoPoint } from '@hdd-planner/domain'
+import type { BoundsBox } from '../../domain/geoBounds'
 
 /** Bounding sphere + heading used to frame the project in an oblique 3D view. */
 export function computeCameraTarget(
@@ -26,4 +27,20 @@ export function computeCameraTarget(
     radius,
     heading: bearing,
   }
+}
+
+/** Bounding sphere framing an arbitrary lng/lat box — used to fly to real uploaded data on first load. */
+export function boundingSphereFromBounds(bounds: BoundsBox, groundHeightM = 0): Cesium.BoundingSphere {
+  const [[minLng, minLat], [maxLng, maxLat]] = bounds
+  const centerLng = (minLng + maxLng) / 2
+  const centerLat = (minLat + maxLat) / 2
+  const center = Cesium.Cartesian3.fromDegrees(centerLng, centerLat, groundHeightM)
+  const corner1 = Cesium.Cartesian3.fromDegrees(minLng, minLat, groundHeightM)
+  const corner2 = Cesium.Cartesian3.fromDegrees(maxLng, maxLat, groundHeightM)
+  const radius = Math.max(
+    Cesium.Cartesian3.distance(center, corner1),
+    Cesium.Cartesian3.distance(center, corner2),
+    45,
+  )
+  return new Cesium.BoundingSphere(center, radius)
 }

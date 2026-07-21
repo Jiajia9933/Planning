@@ -1,0 +1,23 @@
+# Runs the backend straight from TypeScript source via tsx, the same way
+# `npm run dev` already does — `npm run build` (tsc) currently produces
+# output that plain `node` can't actually run (extensionless relative
+# imports aren't valid ESM specifiers, and @hdd-planner/domain's
+# package.json points at its .ts source, which only tsx/vite understand).
+# Fixing that compiled-output path is real follow-up work, not something to
+# take on for a first deploy — this sidesteps it entirely and is proven to
+# work since it's identical to the dev setup.
+FROM node:22-alpine
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY packages/domain/package.json packages/domain/package.json
+COPY backend/package.json backend/package.json
+COPY frontend/package.json frontend/package.json
+RUN npm ci
+
+COPY packages/domain packages/domain
+COPY backend backend
+
+WORKDIR /app/backend
+EXPOSE 4000
+CMD ["npx", "tsx", "src/index.ts"]

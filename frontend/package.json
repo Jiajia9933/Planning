@@ -16,13 +16,16 @@
     "@mui/material": "^9.2.0",
     "cesium": "^1.143.0",
     "maplibre-gl": "^5.24.0",
+    "proj4": "^2.20.9",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "shpjs": "^6.2.0",
     "vite-plugin-cesium": "^1.2.23",
     "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/geojson": "^7946.0.16",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

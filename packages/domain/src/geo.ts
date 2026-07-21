@@ -1,4 +1,4 @@
-import type { GeoPoint } from '../types/hdd'
+import type { GeoPoint } from './types'
 
 const EARTH_RADIUS_M = 6371000
 

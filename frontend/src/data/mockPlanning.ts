@@ -3,9 +3,13 @@
 // panel components or store that consume it.
 import type { PlanningParameters, UtilityLayerState } from '../types/hdd'
 
+// Pre-bootstrap placeholder only — App.tsx's loading gate means this is
+// never actually rendered. Null start/end matches the real backend default
+// (see backend/src/db/defaultParameters.ts) so a fresh project starts empty.
 export const mockPlanningParameters: PlanningParameters = {
-  startPoint: { lat: 52.520123, lng: 13.404954 },
-  endPoint: { lat: 52.52089, lng: 13.407812 },
+  startPoint: null,
+  endPoint: null,
+  waypoints: [],
   drillRig: 'Vermeer D40x55',
   pipeDiameterMm: 160,
   minDrillRadiusM: 30,

@@ -1,9 +1,8 @@
 import * as Cesium from 'cesium'
-import { buildDrillRouteFeature, buildUtilityLinesFeatureCollection } from '../../domain/mockGeometry'
-import { utilityDepthsM } from '../../domain/utilityDepths'
+import type { FeatureCollection, LineString } from 'geojson'
+import { buildDrillRouteFeature, utilityDepthsM } from '@hdd-planner/domain'
+import type { GeoPoint, ProfileSample, UtilityCrossing, UtilityType } from '@hdd-planner/domain'
 import { colors, utilityColors } from '../../theme/tokens'
-import { mockUtilityLayers } from '../../data/mockPlanning'
-import type { GeoPoint, ProfileSample, UtilityCrossing } from '../../types/hdd'
 
 const PIPE_RADIUS_M = 0.35
 const DRILL_RADIUS_M = 0.5
@@ -34,27 +33,28 @@ export function rebuildSceneEntities(
   viewer: Cesium.Viewer,
   startPoint: GeoPoint,
   endPoint: GeoPoint,
+  waypoints: GeoPoint[],
   profile: ProfileSample[],
   conflicts: UtilityCrossing[],
   groundHeightM: number,
+  utilities: FeatureCollection<LineString, { type: UtilityType }>,
 ) {
   viewer.entities.removeAll()
 
-  const utilityTypes = mockUtilityLayers.map((l) => l.type)
-  const utilities = buildUtilityLinesFeatureCollection(startPoint, endPoint, utilityTypes)
   for (const feature of utilities.features) {
     const height = groundHeightM - utilityDepthsM[feature.properties.type]
-    const [[lng1, lat1], [lng2, lat2]] = feature.geometry.coordinates as [number, number][]
+    const coords = feature.geometry.coordinates as [number, number][]
+    const flatPositions = coords.flatMap(([lng, lat]) => [lng, lat, height])
     viewer.entities.add({
       polylineVolume: {
-        positions: Cesium.Cartesian3.fromDegreesArrayHeights([lng1, lat1, height, lng2, lat2, height]),
+        positions: Cesium.Cartesian3.fromDegreesArrayHeights(flatPositions),
         shape: PIPE_SHAPE,
         material: Cesium.Color.fromCssColorString(utilityColors[feature.properties.type]),
       },
     })
   }
 
-  const routeFeature = buildDrillRouteFeature(startPoint, endPoint)
+  const routeFeature = buildDrillRouteFeature(startPoint, endPoint, waypoints)
   const routeCoords = routeFeature.geometry.coordinates as [number, number][]
   const flatPositions: number[] = []
   routeCoords.forEach(([lng, lat], i) => {

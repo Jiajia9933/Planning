@@ -13,6 +13,7 @@ import GpsFixedOutlinedIcon from '@mui/icons-material/GpsFixedOutlined'
 import { colors, utilityColors } from '../../theme/tokens'
 import { usePlanningStore } from '../../store/planningStore'
 import { mockUtilityLayers } from '../../data/mockPlanning'
+import { isResolved } from '@hdd-planner/domain'
 import type { DrillRig, PlanningParameters } from '../../types/hdd'
 
 const utilityLabels = Object.fromEntries(mockUtilityLayers.map((l) => [l.type, l.label]))
@@ -43,6 +44,7 @@ function unitAdornment(unit: string) {
 export function ParametersPanel() {
   const parameters = usePlanningStore((s) => s.parameters)
   const result = usePlanningStore((s) => s.result)
+  const profile = usePlanningStore((s) => s.profile)
   const conflicts = usePlanningStore((s) => s.conflicts)
   const isCalculating = usePlanningStore((s) => s.isCalculating)
   const pointPickMode = usePlanningStore((s) => s.pointPickMode)
@@ -53,6 +55,12 @@ export function ParametersPanel() {
   const update = <K extends keyof PlanningParameters>(key: K, value: PlanningParameters[K]) => {
     setParameter(key, value)
   }
+
+  const resolved = isResolved(parameters)
+  // `profile` empty covers both "points not set" and "set but not yet
+  // calculated" — ERGEBNISSE/KOLLISIONSPRÜFUNG only ever show real,
+  // server-computed numbers, never the inert placeholder.
+  const hasResult = profile.length > 0
 
   return (
     <Box
@@ -81,13 +89,13 @@ export function ParametersPanel() {
         <Stack spacing={1.5} sx={{ mt: 1.5 }}>
           <PointField
             label="Startpunkt"
-            value={formatPoint(parameters.startPoint.lat, parameters.startPoint.lng)}
+            value={parameters.startPoint ? formatPoint(parameters.startPoint.lat, parameters.startPoint.lng) : 'Nicht gesetzt'}
             active={pointPickMode === 'start'}
             onPick={() => setPointPickMode(pointPickMode === 'start' ? null : 'start')}
           />
           <PointField
             label="Zielpunkt"
-            value={formatPoint(parameters.endPoint.lat, parameters.endPoint.lng)}
+            value={parameters.endPoint ? formatPoint(parameters.endPoint.lat, parameters.endPoint.lng) : 'Nicht gesetzt'}
             active={pointPickMode === 'end'}
             onPick={() => setPointPickMode(pointPickMode === 'end' ? null : 'end')}
           />
@@ -150,10 +158,16 @@ export function ParametersPanel() {
             size="large"
             fullWidth
             loading={isCalculating}
-            onClick={calculate}
+            disabled={!resolved}
+            onClick={() => void calculate()}
           >
             Planung berechnen
           </Button>
+          {!resolved && (
+            <Typography variant="caption" color={colors.textMuted}>
+              Setze zuerst Start- und Zielpunkt auf der Karte.
+            </Typography>
+          )}
         </Stack>
       </Box>
 
@@ -163,22 +177,32 @@ export function ParametersPanel() {
         <Typography variant="caption" color={colors.textMuted} sx={{ fontWeight: 700, letterSpacing: 0.5 }}>
           ERGEBNISSE
         </Typography>
-        <Stack spacing={1} sx={{ mt: 1.5 }}>
-          <ResultRow label="Bohrlänge (gesamt)" value={`${result.totalLengthM.toFixed(2)} m`} />
-          <ResultRow label="Bohrlänge (horizontal)" value={`${result.horizontalLengthM.toFixed(2)} m`} />
-          <ResultRow label="Max. Tiefe" value={`${result.maxDepthM.toFixed(2)} m`} />
-          <ResultRow label="Min. Radius" value={`${result.minRadiusM.toFixed(2)} m`} />
-          <ResultRow label="Eintrittspunkt" value={formatPoint(result.entryPoint.lat, result.entryPoint.lng)} />
-          <ResultRow label="Austrittspunkt" value={formatPoint(result.exitPoint.lat, result.exitPoint.lng)} />
-        </Stack>
-        {result.warnings.length > 0 && (
-          <Stack spacing={0.5} sx={{ mt: 1.5 }}>
-            {result.warnings.map((w) => (
-              <Typography key={w} variant="caption" color={colors.accentOrange}>
-                ⚠ {w}
-              </Typography>
-            ))}
-          </Stack>
+        {hasResult ? (
+          <>
+            <Stack spacing={1} sx={{ mt: 1.5 }}>
+              <ResultRow label="Bohrlänge (gesamt)" value={`${result.totalLengthM.toFixed(2)} m`} />
+              <ResultRow label="Bohrlänge (horizontal)" value={`${result.horizontalLengthM.toFixed(2)} m`} />
+              <ResultRow label="Max. Tiefe" value={`${result.maxDepthM.toFixed(2)} m`} />
+              <ResultRow label="Min. Radius" value={`${result.minRadiusM.toFixed(2)} m`} />
+              <ResultRow label="Eintrittspunkt" value={formatPoint(result.entryPoint.lat, result.entryPoint.lng)} />
+              <ResultRow label="Austrittspunkt" value={formatPoint(result.exitPoint.lat, result.exitPoint.lng)} />
+            </Stack>
+            {result.warnings.length > 0 && (
+              <Stack spacing={0.5} sx={{ mt: 1.5 }}>
+                {result.warnings.map((w) => (
+                  <Typography key={w} variant="caption" color={colors.accentOrange}>
+                    ⚠ {w}
+                  </Typography>
+                ))}
+              </Stack>
+            )}
+          </>
+        ) : (
+          <Typography variant="body2" color={colors.textSecondary} sx={{ mt: 1.5 }}>
+            {resolved
+              ? "Klicke auf 'Planung berechnen', um Ergebnisse zu sehen."
+              : 'Setze Start- und Zielpunkt und berechne die Planung.'}
+          </Typography>
         )}
       </Box>
 
@@ -189,7 +213,13 @@ export function ParametersPanel() {
           KOLLISIONSPRÜFUNG
         </Typography>
         <Stack spacing={1} sx={{ mt: 1.5 }}>
-          {conflicts.length === 0 ? (
+          {!hasResult ? (
+            <Typography variant="body2" color={colors.textSecondary}>
+              {resolved
+                ? "Klicke auf 'Planung berechnen' für die Kollisionsprüfung."
+                : 'Setze Start- und Zielpunkt für die Kollisionsprüfung.'}
+            </Typography>
+          ) : conflicts.length === 0 ? (
             <Typography variant="body2" color={colors.textSecondary}>
               Keine Leitungskreuzungen im Bohrpfad.
             </Typography>

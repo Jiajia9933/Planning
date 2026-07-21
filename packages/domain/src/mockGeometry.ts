@@ -1,28 +1,27 @@
 import type { Feature, FeatureCollection, LineString } from 'geojson'
-import type { GeoPoint, UtilityType } from '../types/hdd'
+import { buildRoutePoints, pointAtDistance, routeLengthM } from './routeGeometry'
+import type { GeoPoint, UtilityType } from './types'
 
 /**
- * Quadratic-bezier bow between two points so the drill route reads as a
- * planned curve rather than a straight cut — mirrors how HDD crossings are
- * actually laid out. Replaced by the real geometry engine's output in a
- * later milestone; the GeoJSON shape consumed by the map stays the same.
+ * The drill route's plan-view path: a straight line through start/end, bent
+ * through any manually placed waypoints (e.g. to route around a Flurstück).
+ * Resampled to a fixed step count so every consumer that walks this
+ * alongside the depth profile (also 32 steps) stays positionally aligned.
  */
-export function buildDrillRouteFeature(start: GeoPoint, end: GeoPoint): Feature<LineString> {
+export function buildDrillRouteFeature(
+  start: GeoPoint,
+  end: GeoPoint,
+  waypoints: GeoPoint[] = [],
+): Feature<LineString> {
   const steps = 32
-  const midLat = (start.lat + end.lat) / 2
-  const midLng = (start.lng + end.lng) / 2
-  const dLat = end.lat - start.lat
-  const dLng = end.lng - start.lng
-  const bow = 0.4
-  const controlLat = midLat + dLng * bow
-  const controlLng = midLng - dLat * bow
+  const routePoints = buildRoutePoints(start, end, waypoints)
+  const totalLengthM = routeLengthM(routePoints)
 
   const coordinates: [number, number][] = []
   for (let i = 0; i <= steps; i++) {
     const t = i / steps
-    const lat = (1 - t) ** 2 * start.lat + 2 * (1 - t) * t * controlLat + t ** 2 * end.lat
-    const lng = (1 - t) ** 2 * start.lng + 2 * (1 - t) * t * controlLng + t ** 2 * end.lng
-    coordinates.push([lng, lat])
+    const point = pointAtDistance(routePoints, t * totalLengthM)
+    coordinates.push([point.lng, point.lat])
   }
 
   return {
@@ -34,8 +33,8 @@ export function buildDrillRouteFeature(start: GeoPoint, end: GeoPoint): Feature<
 
 /**
  * Synthetic utility crossings spanning the project's bounding box, standing
- * in for a real cadastral/utility GIS feed (see project doc §5.4/§5.5,
- * "Future: Load automatically from GIS services").
+ * in for a real cadastral/utility GIS feed. Used only as the fallback when
+ * no real Spartenplan has been uploaded.
  */
 export function buildUtilityLinesFeatureCollection(
   start: GeoPoint,

@@ -59,11 +59,21 @@ export function SideViewPanel() {
   const conflicts = usePlanningStore((s) => s.conflicts)
   const entryAngleDeg = usePlanningStore((s) => s.parameters.entryAngleDeg)
   const exitAngleDeg = usePlanningStore((s) => s.parameters.exitAngleDeg)
+  const startPoint = usePlanningStore((s) => s.parameters.startPoint)
+  const endPoint = usePlanningStore((s) => s.parameters.endPoint)
+  const terrainSource = usePlanningStore((s) => s.terrainSource)
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const [hoveredConflict, setHoveredConflict] = useState<UtilityCrossing | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
 
+  // Every hook above stays unconditional (Rules of Hooks) — the empty-state
+  // placeholder is a JSX-level branch further down, not an early return.
+  // `profile` is `[]` both before Start-/Zielpunkt are set and after they
+  // are set but "Planung berechnen" hasn't run yet.
+  const hasProfile = profile.length > 0
+
   const { maxDistance, minHeight, maxHeight } = useMemo(() => {
+    if (profile.length === 0) return { maxDistance: 0, minHeight: 0, maxHeight: 0 }
     const distances = profile.map((p) => p.distanceM)
     const heights = profile.flatMap((p) => [p.terrainHeightM, p.drillPathHeightM, p.minRadiusHeightM])
     return {
@@ -142,8 +152,22 @@ export function SideViewPanel() {
   const tooltipLeftPct = ((MARGIN.left + xScale(tooltipDistanceM)) / WIDTH) * 100
   const tooltipFlips = tooltipLeftPct > 62
 
+  if (!hasProfile) {
+    return (
+      <PanelFrame title="Seitenansicht (Längsschnitt)">
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+          <Typography variant="body2" color={colors.textSecondary}>
+            {startPoint && endPoint
+              ? "Klicke auf 'Planung berechnen', um das Seitenprofil zu sehen."
+              : 'Setze Start- und Zielpunkt, um das Seitenprofil zu sehen.'}
+          </Typography>
+        </Box>
+      </PanelFrame>
+    )
+  }
+
   return (
-    <PanelFrame title="Seitenansicht (Längsschnitt)" actions={<SideViewLegend />}>
+    <PanelFrame title="Seitenansicht (Längsschnitt)" actions={<SideViewLegend terrainSource={terrainSource} />}>
       <Box sx={{ position: 'relative', width: '100%', height: '100%' }}>
         <svg
           ref={svgRef}
@@ -314,10 +338,13 @@ export function SideViewPanel() {
   )
 }
 
-function SideViewLegend() {
+function SideViewLegend({ terrainSource }: { terrainSource: 'real' | 'synthetic' }) {
   return (
     <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-      <LegendSwatch color="#e2603f" label="Gelände" />
+      <LegendSwatch
+        color="#e2603f"
+        label={terrainSource === 'real' ? 'Gelände (reale Höhendaten)' : 'Gelände (vereinfacht)'}
+      />
       <LegendSwatch color={colors.accentOrange} label="Bohrpfad" thick />
       <LegendSwatch color={colors.textPrimary} label="Min. Radius" dashed />
       {mockUtilityLayers.map((l) => (

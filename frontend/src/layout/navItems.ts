@@ -1,4 +1,5 @@
 import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined'
+import CloudUploadOutlinedIcon from '@mui/icons-material/CloudUploadOutlined'
 import MapOutlinedIcon from '@mui/icons-material/MapOutlined'
 import ArchitectureOutlinedIcon from '@mui/icons-material/ArchitectureOutlined'
 import ViewInArOutlinedIcon from '@mui/icons-material/ViewInArOutlined'
@@ -16,6 +17,7 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
   { id: 'projekt', label: 'Projekt', icon: FolderOutlinedIcon },
+  { id: 'daten', label: 'Daten', icon: CloudUploadOutlinedIcon },
   { id: 'karte', label: 'Karte', icon: MapOutlinedIcon },
   { id: 'bohrplanung', label: 'Bohrplanung', icon: ArchitectureOutlinedIcon },
   { id: '3d-ansicht', label: '3D Ansicht', icon: ViewInArOutlinedIcon },

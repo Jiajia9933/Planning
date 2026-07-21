@@ -1,10 +1,11 @@
-import { useState } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { navItems } from './navItems'
 import { colors } from '../theme/tokens'
+import { usePlanningStore } from '../store/planningStore'
 
 export function LeftNavRail() {
-  const [activeId, setActiveId] = useState('karte')
+  const activeId = usePlanningStore((s) => s.activeNavId)
+  const setActiveId = usePlanningStore((s) => s.setActiveNavId)
 
   return (
     <Box

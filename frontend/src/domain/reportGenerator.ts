@@ -72,8 +72,8 @@ export function buildReportHtml(
 
   <h2>Planungsparameter</h2>
   <table>
-    ${row('Startpunkt', formatPoint(parameters.startPoint.lat, parameters.startPoint.lng))}
-    ${row('Zielpunkt', formatPoint(parameters.endPoint.lat, parameters.endPoint.lng))}
+    ${row('Startpunkt', parameters.startPoint ? formatPoint(parameters.startPoint.lat, parameters.startPoint.lng) : 'Nicht gesetzt')}
+    ${row('Zielpunkt', parameters.endPoint ? formatPoint(parameters.endPoint.lat, parameters.endPoint.lng) : 'Nicht gesetzt')}
     ${row('Bohrgerät', parameters.drillRig)}
     ${row('Bohrdurchmesser', `${parameters.pipeDiameterMm} mm`)}
     ${row('Bohrradius (min.)', `${parameters.minDrillRadiusM} m`)}

@@ -1,17 +1,34 @@
+import { useMemo } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { colors, utilityColors } from '../../theme/tokens'
 import { usePlanningStore } from '../../store/planningStore'
+import { mockUtilityLayers } from '../../data/mockPlanning'
 
-const crossSection = [
-  { key: 'strom', label: 'Strom', distanceM: 1.2, angleDeg: -55 },
-  { key: 'wasser', label: 'Wasser', distanceM: 1.5, angleDeg: 55 },
-  { key: 'gas', label: 'Gas', distanceM: 1.8, angleDeg: -125 },
-  { key: 'telekommunikation', label: 'Telekom', distanceM: 1.1, angleDeg: 125 },
-] as const
+const utilityLabels = Object.fromEntries(mockUtilityLayers.map((l) => [l.type, l.label]))
 
 export function Info3DPanel() {
   const parameters = usePlanningStore((s) => s.parameters)
   const result = usePlanningStore((s) => s.result)
+  const conflicts = usePlanningStore((s) => s.conflicts)
+
+  // Real crossed utilities, not a hardcoded mockup — one dot per unique
+  // type actually crossed (conflicts already arrive sorted by distanceM, so
+  // the first occurrence per type is the one nearest the entry point),
+  // spread evenly around the circle. Empty when nothing's been calculated
+  // yet, which naturally degrades to just the bare ring/hub below.
+  const crossSection = useMemo(() => {
+    const byType = new Map<string, (typeof conflicts)[number]>()
+    for (const c of conflicts) {
+      if (!byType.has(c.type)) byType.set(c.type, c)
+    }
+    const entries = [...byType.values()]
+    return entries.map((crossing, i) => ({
+      key: crossing.type,
+      label: utilityLabels[crossing.type],
+      distanceM: crossing.utilityDepthM,
+      angleDeg: -90 + (360 / entries.length) * i,
+    }))
+  }, [conflicts])
 
   return (
     <Box

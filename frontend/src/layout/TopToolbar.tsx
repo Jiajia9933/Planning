@@ -1,15 +1,19 @@
-import { Box, Button, IconButton, Stack, Typography, Tooltip } from '@mui/material'
+import { useState } from 'react'
+import type { MouseEvent } from 'react'
+import { Box, Button, IconButton, Stack, Typography, Tooltip, Menu, MenuItem, Divider } from '@mui/material'
 import UndoIcon from '@mui/icons-material/Undo'
 import RedoIcon from '@mui/icons-material/Redo'
 import SaveOutlinedIcon from '@mui/icons-material/SaveOutlined'
 import HelpOutlineIcon from '@mui/icons-material/HelpOutlineOutlined'
 import PersonOutlineIcon from '@mui/icons-material/PersonOutlineOutlined'
 import { colors } from '../theme/tokens'
+import { useAuthStore } from '../features/auth/authStore'
 
 interface TopToolbarProps {
   projectName: string
   projectCode: string
   onSave: () => void
+  isSaving?: boolean
   onExport: () => void
   onCreateReport: () => void
 }
@@ -18,9 +22,17 @@ export function TopToolbar({
   projectName,
   projectCode,
   onSave,
+  isSaving,
   onExport,
   onCreateReport,
 }: TopToolbarProps) {
+  const email = useAuthStore((s) => s.email)
+  const logout = useAuthStore((s) => s.logout)
+  const [menuAnchor, setMenuAnchor] = useState<HTMLElement | null>(null)
+
+  const handleOpenMenu = (e: MouseEvent<HTMLElement>) => setMenuAnchor(e.currentTarget)
+  const handleCloseMenu = () => setMenuAnchor(null)
+
   return (
     <Box
       component="header"
@@ -44,7 +56,7 @@ export function TopToolbar({
       </Box>
 
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-        <Button variant="text" size="small" sx={{ color: colors.textSecondary }} onClick={onSave}>
+        <Button variant="text" size="small" sx={{ color: colors.textSecondary }} onClick={onSave} loading={isSaving}>
           Speichern
         </Button>
         <Button
@@ -81,9 +93,29 @@ export function TopToolbar({
           <IconButton size="small" sx={{ color: colors.textSecondary }}>
             <HelpOutlineIcon fontSize="small" />
           </IconButton>
-          <IconButton size="small" sx={{ color: colors.textSecondary }}>
-            <PersonOutlineIcon fontSize="small" />
-          </IconButton>
+          <Tooltip title={email ?? ''}>
+            <IconButton size="small" sx={{ color: colors.textSecondary }} onClick={handleOpenMenu}>
+              <PersonOutlineIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={handleCloseMenu}>
+            {email && (
+              <MenuItem disabled sx={{ opacity: '1 !important' }}>
+                <Typography variant="caption" color={colors.textMuted}>
+                  {email}
+                </Typography>
+              </MenuItem>
+            )}
+            <Divider />
+            <MenuItem
+              onClick={() => {
+                handleCloseMenu()
+                logout()
+              }}
+            >
+              Abmelden
+            </MenuItem>
+          </Menu>
         </Stack>
       </Stack>
     </Box>

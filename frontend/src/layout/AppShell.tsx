@@ -7,66 +7,83 @@ import { ParametersPanel } from '../features/planning/ParametersPanel'
 import { SideViewPanel } from '../features/sideview/SideViewPanel'
 import { Viewer3DPanel } from '../features/viewer3d/Viewer3DPanel'
 import { Info3DPanel } from '../features/viewer3d/Info3DPanel'
+import { DatenPanel } from '../features/daten/DatenPanel'
 import { colors } from '../theme/tokens'
-import { PROJECT_NAME, PROJECT_CODE } from '../data/project'
 import { usePlanningStore } from '../store/planningStore'
-import { saveProject } from '../domain/projectStorage'
 import { downloadFile } from '../domain/fileDownload'
 import { buildReportHtml } from '../domain/reportGenerator'
 import { useToast } from '../hooks/useToast'
 
 export function AppShell() {
+  const projectName = usePlanningStore((s) => s.projectName)
+  const projectCode = usePlanningStore((s) => s.projectCode)
   const parameters = usePlanningStore((s) => s.parameters)
   const result = usePlanningStore((s) => s.result)
   const profile = usePlanningStore((s) => s.profile)
   const conflicts = usePlanningStore((s) => s.conflicts)
+  const activeNavId = usePlanningStore((s) => s.activeNavId)
+  const isSaving = usePlanningStore((s) => s.isSaving)
+  const saveParameters = usePlanningStore((s) => s.saveParameters)
   const { toast, showToast, closeToast } = useToast()
 
-  const handleSave = () => {
-    saveProject(PROJECT_CODE, parameters)
-    showToast('Projekt gespeichert')
+  const handleSave = async () => {
+    try {
+      await saveParameters()
+      showToast('Projekt gespeichert')
+    } catch {
+      showToast('Speichern fehlgeschlagen')
+    }
   }
 
   const handleExport = () => {
-    const payload = { projectName: PROJECT_NAME, projectCode: PROJECT_CODE, parameters, result, profile, conflicts }
-    downloadFile(`${PROJECT_CODE}.json`, JSON.stringify(payload, null, 2), 'application/json')
+    const payload = { projectName, projectCode, parameters, result, profile, conflicts }
+    downloadFile(`${projectCode}.json`, JSON.stringify(payload, null, 2), 'application/json')
     showToast('Projekt exportiert')
   }
 
   const handleCreateReport = () => {
-    const html = buildReportHtml(PROJECT_NAME, PROJECT_CODE, parameters, result, conflicts)
-    downloadFile(`${PROJECT_CODE}-bericht.html`, html, 'text/html')
+    const html = buildReportHtml(projectName, projectCode, parameters, result, conflicts)
+    downloadFile(`${projectCode}-bericht.html`, html, 'text/html')
     showToast('Bericht erstellt')
   }
 
   return (
     <Box className={styles.shell} sx={{ color: colors.textPrimary, bgcolor: colors.bgApp }}>
       <TopToolbar
-        projectName={PROJECT_NAME}
-        projectCode={PROJECT_CODE}
-        onSave={handleSave}
+        projectName={projectName}
+        projectCode={projectCode}
+        onSave={() => void handleSave()}
+        isSaving={isSaving}
         onExport={handleExport}
         onCreateReport={handleCreateReport}
       />
 
       <LeftNavRail />
 
-      <Box sx={{ gridArea: 'map', minHeight: 0, minWidth: 0, borderBottom: `1px solid ${colors.border}` }}>
-        <MapPanel />
-      </Box>
-
-      <ParametersPanel />
-
-      <Box className={styles.bottomRow}>
-        <Box sx={{ minHeight: 0, minWidth: 0, borderRight: `1px solid ${colors.border}` }}>
-          <SideViewPanel />
+      {activeNavId === 'daten' ? (
+        <Box className={styles.dataPage}>
+          <DatenPanel />
         </Box>
-        <Box sx={{ minHeight: 0, minWidth: 0 }}>
-          <Viewer3DPanel />
-        </Box>
-      </Box>
+      ) : (
+        <>
+          <Box sx={{ gridArea: 'map', minHeight: 0, minWidth: 0, borderBottom: `1px solid ${colors.border}` }}>
+            <MapPanel />
+          </Box>
 
-      <Info3DPanel />
+          <ParametersPanel />
+
+          <Box className={styles.bottomRow}>
+            <Box sx={{ minHeight: 0, minWidth: 0, borderRight: `1px solid ${colors.border}` }}>
+              <SideViewPanel />
+            </Box>
+            <Box sx={{ minHeight: 0, minWidth: 0 }}>
+              <Viewer3DPanel />
+            </Box>
+          </Box>
+
+          <Info3DPanel />
+        </>
+      )}
 
       <Snackbar
         open={!!toast}
