@@ -55,9 +55,19 @@ services:
         VITE_CESIUM_ION_TOKEN: ${VITE_CESIUM_ION_TOKEN}
     ports:
       - '80:80'
+      - '443:443'
+    volumes:
+      # Bind-mounted, not baked into the image at build time: cert renewal
+      # and nginx config edits (see the HTTPS setup) then only need a
+      # `docker compose restart frontend`, never a rebuild.
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - certbot-etc:/etc/letsencrypt:ro
+      - certbot-webroot:/var/www/certbot:ro
     depends_on:
       - backend
     restart: unless-stopped
 
 volumes:
   pgdata:
+  certbot-etc:
+  certbot-webroot:
