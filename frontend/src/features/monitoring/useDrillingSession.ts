@@ -57,6 +57,7 @@ export function useDrillingSession(projectId: string | null) {
   const [turnWarning, setTurnWarning] = useState<string | null>(null)
   const [replanTriggerIndex, setReplanTriggerIndex] = useState<number | null>(null)
   const [steeringOffsetDeg, setSteeringOffsetDeg] = useState(0)
+  const [verticalSteeringOffsetDeg, setVerticalSteeringOffsetDeg] = useState(0)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastIndexRef = useRef(-1)
   const hasReplannedRef = useRef(false)
@@ -68,6 +69,7 @@ export function useDrillingSession(projectId: string | null) {
   // presses must each see the previous press's cumulative offset, not a
   // stale value from before React re-renders.
   const steeringOffsetDegRef = useRef(0)
+  const verticalSteeringOffsetDegRef = useRef(0)
   const manualModeRef = useRef(false)
 
   const stopPolling = useCallback(() => {
@@ -106,24 +108,45 @@ export function useDrillingSession(projectId: string | null) {
   // angle relative to the plan — persisted server-side (see the /steer
   // route) so a later /replan trigger reads a currentReading that reflects
   // where the bit actually steered to, not the original unsteered plan.
+  // Every call sends *both* axes' current cumulative offset, since /steer
+  // recomputes the whole tail from scratch — it has no memory of "the
+  // other axis" between calls.
+  const sendSteer = useCallback(async () => {
+    if (!projectId || readingsRef.current.length === 0) return
+    const atElapsedS = readingsRef.current[readingsRef.current.length - 1].elapsedS
+    try {
+      await apiFetch(`/api/projects/${projectId}/drilling-session/steer`, {
+        method: 'POST',
+        body: {
+          atElapsedS,
+          steeringOffsetDeg: steeringOffsetDegRef.current,
+          verticalSteeringOffsetDeg: verticalSteeringOffsetDegRef.current,
+        },
+      })
+    } catch {
+      // Non-fatal — a dropped steering command just leaves the run on
+      // whatever course was already persisted; the next key press retries.
+    }
+  }, [projectId])
+
   const steer = useCallback(
-    async (deltaDeg: number) => {
-      if (!projectId || !manualModeRef.current || readingsRef.current.length === 0) return
-      const newOffset = steeringOffsetDegRef.current + deltaDeg
-      steeringOffsetDegRef.current = newOffset
-      setSteeringOffsetDeg(newOffset)
-      const atElapsedS = readingsRef.current[readingsRef.current.length - 1].elapsedS
-      try {
-        await apiFetch(`/api/projects/${projectId}/drilling-session/steer`, {
-          method: 'POST',
-          body: { atElapsedS, steeringOffsetDeg: newOffset },
-        })
-      } catch {
-        // Non-fatal — a dropped steering command just leaves the run on
-        // whatever course was already persisted; the next key press retries.
-      }
+    (deltaDeg: number) => {
+      if (!manualModeRef.current) return
+      steeringOffsetDegRef.current += deltaDeg
+      setSteeringOffsetDeg(steeringOffsetDegRef.current)
+      void sendSteer()
     },
-    [projectId],
+    [sendSteer],
+  )
+
+  const steerVertical = useCallback(
+    (deltaDeg: number) => {
+      if (!manualModeRef.current) return
+      verticalSteeringOffsetDegRef.current += deltaDeg
+      setVerticalSteeringOffsetDeg(verticalSteeringOffsetDegRef.current)
+      void sendSteer()
+    },
+    [sendSteer],
   )
 
   const poll = useCallback(async () => {
@@ -132,29 +155,46 @@ export function useDrillingSession(projectId: string | null) {
       const data = await apiFetch<LiveResponse>(
         `/api/projects/${projectId}/drilling-session/live?sinceIndex=${lastIndexRef.current}`,
       )
+      let consumedThroughIndex = lastIndexRef.current
       if (data.newReadings.length > 0) {
-        lastIndexRef.current = data.currentIndex
-        const startIdx = readingsRef.current.length
-        readingsRef.current = [...readingsRef.current, ...data.newReadings]
-        setReadings(readingsRef.current)
+        // At 200x playback, a single poll tick can reveal hundreds of
+        // simulated seconds at once. If the trigger is found partway
+        // through this batch, everything after it was captured *before*
+        // the correction below runs — it's the stale, pre-replan
+        // trajectory. Cut the batch off right there instead of appending
+        // it: the next poll re-fetches from this point and gets the
+        // corrected tail the backend is about to splice in. Without this,
+        // the stale remainder (sometimes the entire rest of the run) stays
+        // in `readings` forever and the correction is never visible.
+        let batch = data.newReadings
+        consumedThroughIndex = data.currentIndex
 
         if (!hasReplannedRef.current) {
-          for (let i = startIdx; i < readingsRef.current.length; i++) {
-            const reading = readingsRef.current[i]
+          for (let i = 0; i < batch.length; i++) {
+            const reading = batch[i]
             const crossedThreshold =
               reading.lateralDeviationM >= DEVIATION_WARN_M || Math.abs(reading.verticalDeviationM) >= DEVIATION_WARN_M
-            const windowSoFar = readingsRef.current.slice(0, i + 1)
+            const windowSoFar = [...readingsRef.current, ...batch.slice(0, i + 1)]
             const trending =
               isTrendingAway(windowSoFar, 'lateralDeviationM') || isTrendingAway(windowSoFar, 'verticalDeviationM')
             if (crossedThreshold || trending) {
+              batch = batch.slice(0, i + 1)
+              consumedThroughIndex = reading.elapsedS
               void triggerReplan(reading)
               break
             }
           }
         }
+
+        readingsRef.current = [...readingsRef.current, ...batch]
+        setReadings(readingsRef.current)
+        lastIndexRef.current = consumedThroughIndex
       }
       setTotalReadings(data.totalReadings)
-      if (data.isComplete) {
+      // Only "complete" if we actually consumed all the way to the
+      // server's current position — if the batch was cut short for a
+      // fresh trigger, a corrected tail is still coming.
+      if (data.isComplete && consumedThroughIndex === data.currentIndex) {
         setIsComplete(true)
         stopPolling()
       }
@@ -174,10 +214,12 @@ export function useDrillingSession(projectId: string | null) {
       setTurnWarning(null)
       setReplanTriggerIndex(null)
       setSteeringOffsetDeg(0)
+      setVerticalSteeringOffsetDeg(0)
       lastIndexRef.current = -1
       hasReplannedRef.current = false
       readingsRef.current = []
       steeringOffsetDegRef.current = 0
+      verticalSteeringOffsetDegRef.current = 0
       manualModeRef.current = manualMode
       try {
         await apiFetch(`/api/projects/${projectId}/drilling-session/start`, { method: 'POST', body: { manualMode } })
@@ -203,7 +245,9 @@ export function useDrillingSession(projectId: string | null) {
     turnWarning,
     replanTriggerIndex,
     steeringOffsetDeg,
+    verticalSteeringOffsetDeg,
     steer,
+    steerVertical,
     start,
   }
 }

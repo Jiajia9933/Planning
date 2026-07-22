@@ -38,7 +38,9 @@ export function MonitoringPanel() {
     turnWarning,
     replanTriggerIndex,
     steeringOffsetDeg,
+    verticalSteeringOffsetDeg,
     steer,
+    steerVertical,
     start,
   } = useDrillingSession(currentProjectId)
 
@@ -106,7 +108,7 @@ export function MonitoringPanel() {
             }
             label={
               <Typography variant="caption" color={colors.textSecondary}>
-                Manuelle Steuerung (Draufsicht anklicken, dann ←/→)
+                Manuelle Steuerung (Draufsicht ←/→, Seitenansicht ↑/↓)
               </Typography>
             }
           />
@@ -145,7 +147,14 @@ export function MonitoringPanel() {
               manualMode={manualMode}
               onSteer={steer}
             />
-            <SeitenansichtView profile={profile} readings={readings} replanTriggerIndex={replanTriggerIndex} guidance={guidance} />
+            <SeitenansichtView
+              profile={profile}
+              readings={readings}
+              replanTriggerIndex={replanTriggerIndex}
+              guidance={guidance}
+              manualMode={manualMode}
+              onSteerVertical={steerVertical}
+            />
 
             <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 2 }}>
               <Reading label="Zeit" value={formatElapsed(latest.elapsedS)} />
@@ -157,9 +166,16 @@ export function MonitoringPanel() {
               <Reading label="Richtung" value={`${latest.headingDeg.toFixed(1)}°`} />
               {manualMode && (
                 <Reading
-                  label="Lenkwinkel"
+                  label="Lenkwinkel (horiz.)"
                   value={`${steeringOffsetDeg >= 0 ? '+' : ''}${steeringOffsetDeg}°`}
                   color={steeringOffsetDeg === 0 ? undefined : colors.accentOrange}
+                />
+              )}
+              {manualMode && (
+                <Reading
+                  label="Lenkwinkel (vert.)"
+                  value={`${verticalSteeringOffsetDeg >= 0 ? '+' : ''}${verticalSteeringOffsetDeg}°`}
+                  color={verticalSteeringOffsetDeg === 0 ? undefined : colors.accentOrange}
                 />
               )}
               <Reading label="Vortriebskraft" value={`${latest.forceKn.toFixed(1)} kN`} />

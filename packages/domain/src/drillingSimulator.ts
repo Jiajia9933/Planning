@@ -122,30 +122,35 @@ export function generateDrillingSession(
 /**
  * Regenerates the readings tail from `currentReading` onward under manual
  * keyboard steering ("manuelle Steuerung" Testlauf mode): at every future
- * second, the actual heading is the *planned* route's own heading at that
- * point in (elapsed-time-mapped) chainage plus a constant steering offset —
- * a held rudder angle, not a one-off nudge, so a sustained non-zero offset
- * drifts the bit further and further from the plan each second, same as
- * really holding a course correction would. Position is dead-reckoned step
- * by step from the bit's actual current position (unlike the automatic-
- * drift model's offset-from-the-planned-line-at-this-distance approach,
- * which stops making sense once the bit has actually turned away — "1m
- * ahead on the original line" is no longer where it's heading). Depth
- * keeps following the planned profile exactly — no vertical steering yet.
+ * second, the actual heading/pitch is the *planned* route's own
+ * heading/slope at that point in (elapsed-time-mapped) chainage plus a
+ * constant steering offset — a held rudder angle, not a one-off nudge, so a
+ * sustained non-zero offset drifts the bit further and further from the
+ * plan each second, same as really holding a course correction would.
+ * Position and depth are both dead-reckoned step by step from the bit's
+ * actual current state (unlike the automatic-drift model's offset-from-
+ * the-planned-line-at-this-distance approach, which stops making sense
+ * once the bit has actually turned away — "1m ahead on the original line"
+ * is no longer where it's heading). Zero offset on an axis means that axis
+ * exactly tracks the plan, matching "nothing happens without keyboard
+ * input".
  */
 export function applyManualSteering(
   currentReading: DrillingReading,
   params: ResolvedPlanningParameters,
   steeringOffsetDeg: number,
+  verticalSteeringOffsetDeg = 0,
 ): DrillingReading[] {
   const { profile } = computePlanning(params)
   const routePoints = buildRoutePoints(params.startPoint, params.endPoint, params.waypoints)
   const totalLengthM = routeLengthM(routePoints)
   const totalDurationS = Math.max(1, Math.round((totalLengthM / AVG_ROP_M_PER_MIN) * 60))
   const stepM = AVG_ROP_M_PER_MIN / 60
+  const verticalSteeringOffsetRad = (verticalSteeringOffsetDeg * Math.PI) / 180
 
   const readings: DrillingReading[] = []
   let position: GeoPoint = { lat: currentReading.lat, lng: currentReading.lng }
+  let depthM = currentReading.depthM
 
   for (let s = currentReading.elapsedS + 1; s <= totalDurationS; s++) {
     const t = Math.min(1, s / totalDurationS)
@@ -155,14 +160,16 @@ export function applyManualSteering(
     const aheadPoint = pointAtDistance(routePoints, Math.min(totalLengthM, referenceDistanceM + 1))
     const plannedHeadingHereDeg = bearingDeg(behindPoint, aheadPoint)
     const headingDeg = (plannedHeadingHereDeg + steeringOffsetDeg + 360) % 360
-
     position = moveByHeading(position, headingDeg, stepM)
 
-    const plannedDepthM = interpolateDepthAtDistance(profile, referenceDistanceM)
-    const verticalDeviationM = pseudoNoise(s * 1.7) * 0.08
-    const depthM = Math.max(0, plannedDepthM + verticalDeviationM)
+    const plannedDepthBehind = interpolateDepthAtDistance(profile, Math.max(0, referenceDistanceM - 1))
+    const plannedDepthAhead = interpolateDepthAtDistance(profile, Math.min(totalLengthM, referenceDistanceM + 1))
+    const plannedSlope = (plannedDepthAhead - plannedDepthBehind) / 2
+    const steeredSlope = Math.tan(Math.atan(plannedSlope) + verticalSteeringOffsetRad)
+    depthM = Math.max(0, depthM + steeredSlope * stepM)
 
     const referencePoint = pointAtDistance(routePoints, referenceDistanceM)
+    const plannedDepthHereM = interpolateDepthAtDistance(profile, referenceDistanceM)
 
     readings.push({
       elapsedS: s,
@@ -174,7 +181,7 @@ export function applyManualSteering(
       headingDeg,
       forceKn: Math.max(10, BASE_FORCE_KN + depthM * 1.5 + pseudoNoise(s * 3.1) * 8),
       lateralDeviationM: haversineDistanceM(position, referencePoint),
-      verticalDeviationM,
+      verticalDeviationM: depthM - plannedDepthHereM,
     })
   }
 

@@ -315,13 +315,19 @@ projectsRouter.post('/:id/drilling-session/steer', async (req, res, next) => {
 
     const atElapsedS = Number(req.body?.atElapsedS)
     const steeringOffsetDeg = Number(req.body?.steeringOffsetDeg)
+    const verticalSteeringOffsetDeg = Number(req.body?.verticalSteeringOffsetDeg ?? 0)
     const currentReading = session.readings[atElapsedS]
-    if (!Number.isInteger(atElapsedS) || !currentReading || !Number.isFinite(steeringOffsetDeg)) {
-      res.status(400).json({ error: 'atElapsedS/steeringOffsetDeg invalid for this session' })
+    if (
+      !Number.isInteger(atElapsedS) ||
+      !currentReading ||
+      !Number.isFinite(steeringOffsetDeg) ||
+      !Number.isFinite(verticalSteeringOffsetDeg)
+    ) {
+      res.status(400).json({ error: 'atElapsedS/steeringOffsetDeg/verticalSteeringOffsetDeg invalid for this session' })
       return
     }
 
-    const newTail = applyManualSteering(currentReading, project.parameters, steeringOffsetDeg)
+    const newTail = applyManualSteering(currentReading, project.parameters, steeringOffsetDeg, verticalSteeringOffsetDeg)
     const splicedReadings = [...session.readings.slice(0, atElapsedS + 1), ...newTail]
     await updateSessionReadings(session.id, splicedReadings)
 

@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import type { KeyboardEvent } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import type { DrillingReading, ProfileSample } from '@hdd-planner/domain'
 import { colors } from '../../theme/tokens'
@@ -11,12 +12,15 @@ const MARGIN = { top: 10, right: 16, bottom: 12, left: 12 }
 const PLOT_W = WIDTH - MARGIN.left - MARGIN.right
 const PLOT_H = HEIGHT - MARGIN.top - MARGIN.bottom
 const ARROW_LENGTH_PX = 34
+const STEER_STEP_DEG = 15
 
 interface SeitenansichtViewProps {
   profile: ProfileSample[]
   readings: DrillingReading[]
   replanTriggerIndex: number | null
   guidance: GuidanceArrows | null
+  manualMode?: boolean
+  onSteerVertical?: (deltaDeg: number) => void
 }
 
 // The plot's X (distance) and Y (depth) axes use independent scales, so a
@@ -32,7 +36,14 @@ function verticalAngleToDelta(angleDeg: number, pxPerMeterX: number, pxPerMeterY
 }
 
 /** Distance × depth, same axis convention as SideViewPanel.tsx — depth here is already "meters below terrain," matching a reading's own depthM directly, no unit conversion needed. */
-export function SeitenansichtView({ profile, readings, replanTriggerIndex, guidance }: SeitenansichtViewProps) {
+export function SeitenansichtView({
+  profile,
+  readings,
+  replanTriggerIndex,
+  guidance,
+  manualMode,
+  onSteerVertical,
+}: SeitenansichtViewProps) {
   const layout = useMemo(() => {
     const plannedDepths = profile.map((p) => ({ distanceM: p.distanceM, depthM: p.terrainHeightM - p.drillPathHeightM }))
     const trailPoints = readings.map((r) => ({ distanceM: r.distanceM, depthM: r.depthM }))
@@ -62,11 +73,38 @@ export function SeitenansichtView({ profile, readings, replanTriggerIndex, guida
 
   const latest = readings.length > 0 ? readings[readings.length - 1] : null
 
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (!onSteerVertical) return
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      onSteerVertical(-STEER_STEP_DEG)
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      onSteerVertical(STEER_STEP_DEG)
+    }
+  }
+
   return (
     <Box>
-      <Typography variant="caption" color={colors.textMuted} sx={{ fontWeight: 700, letterSpacing: 0.5 }}>
-        SEITENANSICHT
-      </Typography>
+      <Stack direction="row" sx={{ alignItems: 'baseline', gap: 1 }}>
+        <Typography variant="caption" color={colors.textMuted} sx={{ fontWeight: 700, letterSpacing: 0.5 }}>
+          SEITENANSICHT
+        </Typography>
+        {manualMode && (
+          <Typography variant="caption" color={colors.accentOrange}>
+            Klicken, dann ↑/↓ zum Steuern
+          </Typography>
+        )}
+      </Stack>
+      <Box
+        tabIndex={manualMode ? 0 : undefined}
+        onKeyDown={manualMode ? handleKeyDown : undefined}
+        sx={{
+          borderRadius: 1,
+          outline: 'none',
+          '&:focus-visible': manualMode ? { boxShadow: `0 0 0 2px ${colors.accentOrange}` } : undefined,
+        }}
+      >
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%" height={HEIGHT}>
         <defs>
           <marker id="sa-arrow-planned" markerWidth={5.5} markerHeight={5.5} refX={4} refY={2.75} orient="auto">
@@ -143,6 +181,7 @@ export function SeitenansichtView({ profile, readings, replanTriggerIndex, guida
           )}
         </g>
       </svg>
+      </Box>
       <Stack direction="row" spacing={2} sx={{ mt: 0.5 }}>
         <ArrowLegend color={colors.textMuted} label="Geplant" />
         <ArrowLegend color={colors.accentBlue} label="Ist" />
