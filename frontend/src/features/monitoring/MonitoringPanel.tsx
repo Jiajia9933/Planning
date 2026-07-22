@@ -7,6 +7,7 @@ import { useDrillingSession } from './useDrillingSession'
 import { DraufsichtView } from './DraufsichtView'
 import { SeitenansichtView } from './SeitenansichtView'
 import { deviationColor } from './constants'
+import { computeGuidanceArrows } from './guidanceArrows'
 
 const CHART_WIDTH = 640
 const CHART_HEIGHT = 160
@@ -25,6 +26,7 @@ export function MonitoringPanel() {
   const profile = usePlanningStore((s) => s.profile)
   const result = usePlanningStore((s) => s.result)
   const parameters = usePlanningStore((s) => s.parameters)
+  const uploadedParcels = usePlanningStore((s) => s.uploadedParcels)
   const hasResult = profile.length > 0
 
   const {
@@ -39,6 +41,22 @@ export function MonitoringPanel() {
   } = useDrillingSession(currentProjectId)
 
   const latest = readings.length > 0 ? readings[readings.length - 1] : null
+
+  // Live "what direction should the bit point right now" preview — recomputed
+  // on every new reading, independent of whether an actual replan has been
+  // triggered. See the guidanceArrows module for why this reacts earlier
+  // than the discrete trigger-once auto-replan.
+  const guidance = useMemo(() => {
+    if (!parameters.endPoint) return null
+    return computeGuidanceArrows(
+      readings,
+      parameters.endPoint,
+      profile,
+      uploadedParcels,
+      parameters.minDrillRadiusM,
+      parameters.exitAngleDeg,
+    )
+  }, [readings, parameters.endPoint, profile, uploadedParcels, parameters.minDrillRadiusM, parameters.exitAngleDeg])
 
   // Downsampled to keep the chart light even once a run has thousands of readings.
   const chartPoints = useMemo(() => {
@@ -90,6 +108,11 @@ export function MonitoringPanel() {
                 ⚠ {turnWarning}
               </Typography>
             )}
+            {guidance?.warningText && (
+              <Typography variant="caption" color={colors.accentRed}>
+                ⚠ Live-Korrektur nicht fahrbar: {guidance.warningText}
+              </Typography>
+            )}
 
             <DraufsichtView
               startPoint={parameters.startPoint}
@@ -97,8 +120,9 @@ export function MonitoringPanel() {
               waypoints={parameters.waypoints}
               readings={readings}
               replanTriggerIndex={replanTriggerIndex}
+              guidance={guidance}
             />
-            <SeitenansichtView profile={profile} readings={readings} replanTriggerIndex={replanTriggerIndex} />
+            <SeitenansichtView profile={profile} readings={readings} replanTriggerIndex={replanTriggerIndex} guidance={guidance} />
 
             <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 2 }}>
               <Reading label="Zeit" value={formatElapsed(latest.elapsedS)} />

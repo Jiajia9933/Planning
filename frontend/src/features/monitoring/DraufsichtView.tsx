@@ -1,14 +1,16 @@
 import { useMemo } from 'react'
-import { Box, Typography } from '@mui/material'
+import { Box, Stack, Typography } from '@mui/material'
 import { buildRoutePoints } from '@hdd-planner/domain'
 import type { DrillingReading, GeoPoint } from '@hdd-planner/domain'
 import { colors } from '../../theme/tokens'
 import { deviationColor } from './constants'
+import type { GuidanceArrows } from './guidanceArrows'
 
 const WIDTH = 640
 const HEIGHT = 260
 const MARGIN = 24
 const METERS_PER_DEGREE = 111_320
+const ARROW_LENGTH_PX = 38
 
 interface DraufsichtViewProps {
   startPoint: GeoPoint
@@ -16,6 +18,13 @@ interface DraufsichtViewProps {
   waypoints: GeoPoint[]
   readings: DrillingReading[]
   replanTriggerIndex: number | null
+  guidance: GuidanceArrows | null
+}
+
+/** North (increasing lat) is up in this view — see toLocalMeters/project. */
+function headingToDelta(headingDeg: number, lengthPx: number): { dx: number; dy: number } {
+  const rad = (headingDeg * Math.PI) / 180
+  return { dx: Math.sin(rad) * lengthPx, dy: -Math.cos(rad) * lengthPx }
 }
 
 function toLocalMeters(point: GeoPoint, origin: GeoPoint): { x: number; y: number } {
@@ -26,7 +35,7 @@ function toLocalMeters(point: GeoPoint, origin: GeoPoint): { x: number; y: numbe
 }
 
 /** Plan-view (bird's-eye) of the planned route vs. the actual simulated trail — local-planar projection, same simplification used throughout this codebase (lineIntersection.ts, routeOptimizer.ts), not a real map. */
-export function DraufsichtView({ startPoint, endPoint, waypoints, readings, replanTriggerIndex }: DraufsichtViewProps) {
+export function DraufsichtView({ startPoint, endPoint, waypoints, readings, replanTriggerIndex, guidance }: DraufsichtViewProps) {
   const layout = useMemo(() => {
     const origin = startPoint
     const plannedPoints = buildRoutePoints(startPoint, endPoint, waypoints)
@@ -81,6 +90,17 @@ export function DraufsichtView({ startPoint, endPoint, waypoints, readings, repl
         DRAUFSICHT
       </Typography>
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%" height={HEIGHT}>
+        <defs>
+          <marker id="arrow-planned" markerWidth={8} markerHeight={8} refX={6} refY={4} orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill={colors.textMuted} />
+          </marker>
+          <marker id="arrow-actual" markerWidth={8} markerHeight={8} refX={6} refY={4} orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill={colors.accentBlue} />
+          </marker>
+          <marker id="arrow-corrective" markerWidth={8} markerHeight={8} refX={6} refY={4} orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill={colors.accentRed} />
+          </marker>
+        </defs>
         <path d={layout.plannedPath} fill="none" stroke={colors.textMuted} strokeWidth={1.5} strokeDasharray="5 4" />
         <path d={layout.trailBeforePath} fill="none" stroke={colors.accentBlue} strokeWidth={2} />
         {layout.trailAfterPath && (
@@ -88,6 +108,49 @@ export function DraufsichtView({ startPoint, endPoint, waypoints, readings, repl
         )}
         <circle cx={layout.startPoint.x} cy={layout.startPoint.y} r={5} fill={colors.accentGreen} stroke={colors.bgApp} strokeWidth={1.5} />
         <circle cx={layout.endPoint.x} cy={layout.endPoint.y} r={5} fill={colors.accentRed} stroke={colors.bgApp} strokeWidth={1.5} />
+        {layout.currentPoint && latest && guidance && (
+          <>
+            {(() => {
+              const { x, y } = layout.currentPoint!
+              const planned = headingToDelta(guidance.plannedHeadingDeg, ARROW_LENGTH_PX)
+              const actual = headingToDelta(guidance.actualHeadingDeg, ARROW_LENGTH_PX)
+              const corrective = headingToDelta(guidance.correctiveHeadingDeg, ARROW_LENGTH_PX)
+              return (
+                <>
+                  <line
+                    x1={x}
+                    y1={y}
+                    x2={x + planned.dx}
+                    y2={y + planned.dy}
+                    stroke={colors.textMuted}
+                    strokeWidth={2}
+                    markerEnd="url(#arrow-planned)"
+                  />
+                  <line
+                    x1={x}
+                    y1={y}
+                    x2={x + actual.dx}
+                    y2={y + actual.dy}
+                    stroke={colors.accentBlue}
+                    strokeWidth={2}
+                    markerEnd="url(#arrow-actual)"
+                  />
+                  <line
+                    x1={x}
+                    y1={y}
+                    x2={x + corrective.dx}
+                    y2={y + corrective.dy}
+                    stroke={colors.accentRed}
+                    strokeWidth={2}
+                    strokeDasharray={guidance.correctiveHeadingFeasible ? undefined : '4 3'}
+                    opacity={guidance.correctiveHeadingFeasible ? 1 : 0.55}
+                    markerEnd="url(#arrow-corrective)"
+                  />
+                </>
+              )
+            })()}
+          </>
+        )}
         {layout.currentPoint && latest && (
           <circle
             cx={layout.currentPoint.x}
@@ -99,6 +162,22 @@ export function DraufsichtView({ startPoint, endPoint, waypoints, readings, repl
           />
         )}
       </svg>
+      <Stack direction="row" spacing={2} sx={{ mt: 0.5 }}>
+        <ArrowLegend color={colors.textMuted} label="Geplant" />
+        <ArrowLegend color={colors.accentBlue} label="Ist" />
+        <ArrowLegend color={colors.accentRed} label="Korrektur" dashed={guidance ? !guidance.correctiveHeadingFeasible : false} />
+      </Stack>
     </Box>
+  )
+}
+
+function ArrowLegend({ color, label, dashed }: { color: string; label: string; dashed?: boolean }) {
+  return (
+    <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+      <Box sx={{ width: 14, height: 2, bgcolor: color, opacity: dashed ? 0.55 : 1 }} />
+      <Typography variant="caption" color={colors.textSecondary}>
+        {label}
+      </Typography>
+    </Stack>
   )
 }
