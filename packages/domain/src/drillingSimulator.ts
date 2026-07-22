@@ -156,6 +156,17 @@ export function applyManualSteering(
   const maxTurnPerStepDeg = (stepM / params.minDrillRadiusM) * (180 / Math.PI)
   const maxPitchTurnPerStepRad = stepM / params.minDrillRadiusM
 
+  // The "converge toward the chord to the target" model only makes sense
+  // once an axis has actually left the plan — otherwise, on a route with
+  // waypoints (bends) or a non-straight depth profile (sag curve), that
+  // chord differs from the plan's own shape even with a zero kick, and
+  // the "untouched" axis would visibly drift anyway. Deciding this once,
+  // from whether the incoming reading already carries any deviation (or
+  // this call's own kick), is what keeps a horizontal-only kick from
+  // ever perturbing Seitenansicht and vice versa.
+  const headingIsOffPlan = currentReading.lateralDeviationM > 0.001 || headingKickDeg !== 0
+  const verticalIsOffPlan = Math.abs(currentReading.verticalDeviationM) > 0.001 || verticalKickDeg !== 0
+
   const readings: DrillingReading[] = []
   let position: GeoPoint = { lat: currentReading.lat, lng: currentReading.lng }
   let depthM = currentReading.depthM
@@ -166,23 +177,39 @@ export function applyManualSteering(
   let currentPitchRad = Math.atan((currentDepthAhead - currentDepthBehind) / 2) + (verticalKickDeg * Math.PI) / 180
 
   for (let s = currentReading.elapsedS + 1; s <= totalDurationS; s++) {
-    const desiredHeadingDeg = bearingDeg(position, params.endPoint)
-    const headingDelta = signedAngleDiffDeg(desiredHeadingDeg, currentHeadingDeg)
-    const clampedHeadingDelta = Math.max(-maxTurnPerStepDeg, Math.min(maxTurnPerStepDeg, headingDelta))
-    currentHeadingDeg = (currentHeadingDeg + clampedHeadingDelta + 360) % 360
-    position = moveByHeading(position, currentHeadingDeg, stepM)
-
-    const remainingLengthM = Math.max(haversineDistanceM(position, params.endPoint), 0.01)
-    const desiredPitchRad = Math.atan(-depthM / remainingLengthM)
-    const pitchDelta = desiredPitchRad - currentPitchRad
-    const clampedPitchDelta = Math.max(-maxPitchTurnPerStepRad, Math.min(maxPitchTurnPerStepRad, pitchDelta))
-    currentPitchRad += clampedPitchDelta
-    depthM = Math.max(0, depthM + Math.tan(currentPitchRad) * stepM)
-
     const t = Math.min(1, s / totalDurationS)
     const referenceDistanceM = t * totalLengthM
-    const referencePoint = pointAtDistance(routePoints, referenceDistanceM)
+    // Chainage-based, not the bit's literal 3D distance to the target —
+    // deliberately independent of `position`, so a horizontal-only kick
+    // can never perturb the vertical convergence target (and vice versa).
+    const remainingReferenceLengthM = Math.max(totalLengthM - referenceDistanceM, 0.01)
+
+    const plannedBehindPoint = pointAtDistance(routePoints, Math.max(0, referenceDistanceM - 1))
+    const plannedAheadPoint = pointAtDistance(routePoints, Math.min(totalLengthM, referenceDistanceM + 1))
+    const plannedHeadingHereDeg = bearingDeg(plannedBehindPoint, plannedAheadPoint)
+
+    if (headingIsOffPlan) {
+      const desiredHeadingDeg = bearingDeg(position, params.endPoint)
+      const headingDelta = signedAngleDiffDeg(desiredHeadingDeg, currentHeadingDeg)
+      const clampedHeadingDelta = Math.max(-maxTurnPerStepDeg, Math.min(maxTurnPerStepDeg, headingDelta))
+      currentHeadingDeg = (currentHeadingDeg + clampedHeadingDelta + 360) % 360
+    } else {
+      currentHeadingDeg = plannedHeadingHereDeg
+    }
+    position = moveByHeading(position, currentHeadingDeg, stepM)
+
     const plannedDepthHereM = interpolateDepthAtDistance(profile, referenceDistanceM)
+    if (verticalIsOffPlan) {
+      const desiredPitchRad = Math.atan(-depthM / remainingReferenceLengthM)
+      const pitchDelta = desiredPitchRad - currentPitchRad
+      const clampedPitchDelta = Math.max(-maxPitchTurnPerStepRad, Math.min(maxPitchTurnPerStepRad, pitchDelta))
+      currentPitchRad += clampedPitchDelta
+      depthM = Math.max(0, depthM + Math.tan(currentPitchRad) * stepM)
+    } else {
+      depthM = plannedDepthHereM
+    }
+
+    const referencePoint = pointAtDistance(routePoints, referenceDistanceM)
 
     readings.push({
       elapsedS: s,
