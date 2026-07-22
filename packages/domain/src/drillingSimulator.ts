@@ -15,6 +15,16 @@ export interface DrillingReading {
   forceKn: number
   lateralDeviationM: number
   verticalDeviationM: number
+  // Manual-steering mode only: has this axis ever been kicked away from
+  // the plan (this call, or an earlier one)? Explicit and carried forward
+  // reading-to-reading rather than inferred from lateral/verticalDeviationM,
+  // because once an axis is deliberately frozen it keeps *reporting* a
+  // growing deviation from the plan (see applyManualSteering) — inferring
+  // "was this kicked?" from that number would wrongly arm the other axis's
+  // convergence on a later steer() call. Absent/undefined outside manual
+  // mode, where the question doesn't apply.
+  headingKicked?: boolean
+  verticalKicked?: boolean
 }
 
 // Placeholder ranges standing in for real sensor telemetry — like the
@@ -132,15 +142,21 @@ function signedAngleDiffDeg(targetDeg: number, currentDeg: number): number {
  * keyboard steering ("manuelle Steuerung" Testlauf mode). A key press is a
  * one-off *kick* — it instantly rotates the bit's current heading/pitch by
  * `headingKickDeg`/`verticalKickDeg` — not a rudder held forever. From the
- * very next second on, with no further input, the bit automatically steers
- * itself back: every step it turns toward the bearing/pitch that would
- * take it straight to the target end point (the same "corrective" direction
- * shown by the red guidance arrow), but the turn RATE is capped by
- * `stepM / minDrillRadiusM` — the same physical bend-radius constraint used
- * everywhere else in this app — so it curves back smoothly over several
- * seconds instead of snapping instantly. Repeated key presses just kick it
- * further before it's finished converging. Zero kick on an axis leaves that
- * axis already converged (matches "nothing happens without keyboard input").
+ * very next second on, with no further input, the kicked axis automatically
+ * steers itself back toward the bearing/pitch that leads straight to the
+ * target end point (the same direction the red guidance arrow shows), at a
+ * rate capped by `stepM / minDrillRadiusM` — the same physical bend-radius
+ * constraint used everywhere else in this app.
+ *
+ * The two axes are fully independent: a horizontal-only kick (verticalKickDeg
+ * omitted) must never move Seitenansicht by even a millimeter, and vice
+ * versa. The axis that wasn't kicked doesn't just "follow the plan" (the
+ * plan's own heading/depth can still change with distance, e.g. an entry
+ * ramp or a bend) — it's held completely frozen at exactly its value from
+ * `currentReading`, second after second, until *that* axis is itself
+ * kicked. See `DrillingReading.headingKicked`/`verticalKicked` for why this
+ * is tracked as an explicit flag rather than inferred from the deviation
+ * numbers.
  */
 export function applyManualSteering(
   currentReading: DrillingReading,
@@ -156,25 +172,20 @@ export function applyManualSteering(
   const maxTurnPerStepDeg = (stepM / params.minDrillRadiusM) * (180 / Math.PI)
   const maxPitchTurnPerStepRad = stepM / params.minDrillRadiusM
 
-  // The "converge toward the chord to the target" model only makes sense
-  // once an axis has actually left the plan — otherwise, on a route with
-  // waypoints (bends) or a non-straight depth profile (sag curve), that
-  // chord differs from the plan's own shape even with a zero kick, and
-  // the "untouched" axis would visibly drift anyway. Deciding this once,
-  // from whether the incoming reading already carries any deviation (or
-  // this call's own kick), is what keeps a horizontal-only kick from
-  // ever perturbing Seitenansicht and vice versa.
-  const headingIsOffPlan = currentReading.lateralDeviationM > 0.001 || headingKickDeg !== 0
-  const verticalIsOffPlan = Math.abs(currentReading.verticalDeviationM) > 0.001 || verticalKickDeg !== 0
+  const headingIsKicked = currentReading.headingKicked === true || headingKickDeg !== 0
+  const verticalIsKicked = currentReading.verticalKicked === true || verticalKickDeg !== 0
 
   const readings: DrillingReading[] = []
   let position: GeoPoint = { lat: currentReading.lat, lng: currentReading.lng }
   let depthM = currentReading.depthM
   let currentHeadingDeg = (currentReading.headingDeg + headingKickDeg + 360) % 360
 
-  const currentDepthBehind = interpolateDepthAtDistance(profile, Math.max(0, currentReading.distanceM - 1))
-  const currentDepthAhead = interpolateDepthAtDistance(profile, Math.min(totalLengthM, currentReading.distanceM + 1))
-  let currentPitchRad = Math.atan((currentDepthAhead - currentDepthBehind) / 2) + (verticalKickDeg * Math.PI) / 180
+  let currentPitchRad = 0
+  if (verticalIsKicked) {
+    const currentDepthBehind = interpolateDepthAtDistance(profile, Math.max(0, currentReading.distanceM - 1))
+    const currentDepthAhead = interpolateDepthAtDistance(profile, Math.min(totalLengthM, currentReading.distanceM + 1))
+    currentPitchRad = Math.atan((currentDepthAhead - currentDepthBehind) / 2) + (verticalKickDeg * Math.PI) / 180
+  }
 
   for (let s = currentReading.elapsedS + 1; s <= totalDurationS; s++) {
     const t = Math.min(1, s / totalDurationS)
@@ -184,32 +195,29 @@ export function applyManualSteering(
     // can never perturb the vertical convergence target (and vice versa).
     const remainingReferenceLengthM = Math.max(totalLengthM - referenceDistanceM, 0.01)
 
-    const plannedBehindPoint = pointAtDistance(routePoints, Math.max(0, referenceDistanceM - 1))
-    const plannedAheadPoint = pointAtDistance(routePoints, Math.min(totalLengthM, referenceDistanceM + 1))
-    const plannedHeadingHereDeg = bearingDeg(plannedBehindPoint, plannedAheadPoint)
-
-    if (headingIsOffPlan) {
+    if (headingIsKicked) {
       const desiredHeadingDeg = bearingDeg(position, params.endPoint)
       const headingDelta = signedAngleDiffDeg(desiredHeadingDeg, currentHeadingDeg)
       const clampedHeadingDelta = Math.max(-maxTurnPerStepDeg, Math.min(maxTurnPerStepDeg, headingDelta))
       currentHeadingDeg = (currentHeadingDeg + clampedHeadingDelta + 360) % 360
-    } else {
-      currentHeadingDeg = plannedHeadingHereDeg
     }
+    // else: currentHeadingDeg stays exactly what it already was — the bit
+    // still moves forward (ROP never stops), just in a straight,
+    // uncorrected line, since this axis has never been touched.
     position = moveByHeading(position, currentHeadingDeg, stepM)
 
-    const plannedDepthHereM = interpolateDepthAtDistance(profile, referenceDistanceM)
-    if (verticalIsOffPlan) {
+    if (verticalIsKicked) {
       const desiredPitchRad = Math.atan(-depthM / remainingReferenceLengthM)
       const pitchDelta = desiredPitchRad - currentPitchRad
       const clampedPitchDelta = Math.max(-maxPitchTurnPerStepRad, Math.min(maxPitchTurnPerStepRad, pitchDelta))
       currentPitchRad += clampedPitchDelta
       depthM = Math.max(0, depthM + Math.tan(currentPitchRad) * stepM)
-    } else {
-      depthM = plannedDepthHereM
     }
+    // else: depthM stays frozen at currentReading.depthM — no vertical
+    // motion at all until the vertical axis is itself kicked.
 
     const referencePoint = pointAtDistance(routePoints, referenceDistanceM)
+    const plannedDepthHereM = interpolateDepthAtDistance(profile, referenceDistanceM)
 
     readings.push({
       elapsedS: s,
@@ -222,6 +230,8 @@ export function applyManualSteering(
       forceKn: Math.max(10, BASE_FORCE_KN + depthM * 1.5 + pseudoNoise(s * 3.1) * 8),
       lateralDeviationM: haversineDistanceM(position, referencePoint),
       verticalDeviationM: depthM - plannedDepthHereM,
+      headingKicked: headingIsKicked,
+      verticalKicked: verticalIsKicked,
     })
   }
 
