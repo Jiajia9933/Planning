@@ -78,6 +78,8 @@ export function AppShell() {
         <Box className={styles.dataPage}>
           <BerichtePanel />
         </Box>
+      ) : activeNavId === 'bohrplanung' ? (
+        <Box className={styles.dataPage} />
       ) : (
         <>
           <Box sx={{ gridArea: 'map', minHeight: 0, minWidth: 0, borderBottom: `1px solid ${colors.border}` }}>
