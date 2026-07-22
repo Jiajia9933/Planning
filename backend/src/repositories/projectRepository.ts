@@ -1,5 +1,6 @@
 import type { PlanningParameters } from '@hdd-planner/domain'
 import { pool } from '../db/pool'
+import { defaultParameters } from '../db/defaultParameters'
 
 export interface Project {
   id: string
@@ -9,8 +10,18 @@ export interface Project {
   parameters: PlanningParameters
 }
 
+// Projects saved before a field was added to PlanningParameters (e.g.
+// maxDeflectionAngleDeg) have plain old JSONB on disk missing it — backfill
+// from the current defaults on every read so old rows stay valid against
+// today's stricter isPlanningParameters check, without a DB migration.
 function mapRow(row: { id: string; user_id: string; name: string; code: string; parameters: PlanningParameters }): Project {
-  return { id: row.id, userId: row.user_id, name: row.name, code: row.code, parameters: row.parameters }
+  return {
+    id: row.id,
+    userId: row.user_id,
+    name: row.name,
+    code: row.code,
+    parameters: { ...defaultParameters, ...row.parameters },
+  }
 }
 
 function generateProjectCode(): string {
