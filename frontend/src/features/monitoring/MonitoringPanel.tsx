@@ -37,8 +37,8 @@ export function MonitoringPanel() {
     error,
     turnWarning,
     replanTriggerIndex,
-    steeringOffsetDeg,
-    verticalSteeringOffsetDeg,
+    lastHeadingKickDeg,
+    lastVerticalKickDeg,
     steer,
     steerVertical,
     start,
@@ -108,7 +108,7 @@ export function MonitoringPanel() {
             }
             label={
               <Typography variant="caption" color={colors.textSecondary}>
-                Manuelle Steuerung (Draufsicht ←/→, Seitenansicht ↑/↓)
+                Manuelle Steuerung (Draufsicht ←/→, Seitenansicht ↑/↓ — jeder Tastendruck stößt die Ist-Richtung an, danach korrigiert sie sich von selbst zurück)
               </Typography>
             }
           />
@@ -164,18 +164,18 @@ export function MonitoringPanel() {
               />
               <Reading label="Vortriebsgeschwindigkeit" value={`${latest.speedMPerMin.toFixed(2)} m/min`} />
               <Reading label="Richtung" value={`${latest.headingDeg.toFixed(1)}°`} />
-              {manualMode && (
+              {manualMode && lastHeadingKickDeg !== null && (
                 <Reading
-                  label="Lenkwinkel (horiz.)"
-                  value={`${steeringOffsetDeg >= 0 ? '+' : ''}${steeringOffsetDeg}°`}
-                  color={steeringOffsetDeg === 0 ? undefined : colors.accentOrange}
+                  label="Letzte Korrektur (horiz.)"
+                  value={`${lastHeadingKickDeg >= 0 ? '+' : ''}${lastHeadingKickDeg}° — korrigiert automatisch zurück`}
+                  color={colors.accentOrange}
                 />
               )}
-              {manualMode && (
+              {manualMode && lastVerticalKickDeg !== null && (
                 <Reading
-                  label="Lenkwinkel (vert.)"
-                  value={`${verticalSteeringOffsetDeg >= 0 ? '+' : ''}${verticalSteeringOffsetDeg}°`}
-                  color={verticalSteeringOffsetDeg === 0 ? undefined : colors.accentOrange}
+                  label="Letzte Korrektur (vert.)"
+                  value={`${lastVerticalKickDeg >= 0 ? '+' : ''}${lastVerticalKickDeg}° — korrigiert automatisch zurück`}
+                  color={colors.accentOrange}
                 />
               )}
               <Reading label="Vortriebskraft" value={`${latest.forceKn.toFixed(1)} kN`} />

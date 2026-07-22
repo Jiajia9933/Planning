@@ -119,55 +119,68 @@ export function generateDrillingSession(
   return readings
 }
 
+/** Signed shortest angular difference target-minus-current, in (-180, 180], handling the 0/360 wraparound. */
+function signedAngleDiffDeg(targetDeg: number, currentDeg: number): number {
+  let diff = (targetDeg - currentDeg) % 360
+  if (diff > 180) diff -= 360
+  if (diff < -180) diff += 360
+  return diff
+}
+
 /**
  * Regenerates the readings tail from `currentReading` onward under manual
- * keyboard steering ("manuelle Steuerung" Testlauf mode): at every future
- * second, the actual heading/pitch is the *planned* route's own
- * heading/slope at that point in (elapsed-time-mapped) chainage plus a
- * constant steering offset — a held rudder angle, not a one-off nudge, so a
- * sustained non-zero offset drifts the bit further and further from the
- * plan each second, same as really holding a course correction would.
- * Position and depth are both dead-reckoned step by step from the bit's
- * actual current state (unlike the automatic-drift model's offset-from-
- * the-planned-line-at-this-distance approach, which stops making sense
- * once the bit has actually turned away — "1m ahead on the original line"
- * is no longer where it's heading). Zero offset on an axis means that axis
- * exactly tracks the plan, matching "nothing happens without keyboard
- * input".
+ * keyboard steering ("manuelle Steuerung" Testlauf mode). A key press is a
+ * one-off *kick* — it instantly rotates the bit's current heading/pitch by
+ * `headingKickDeg`/`verticalKickDeg` — not a rudder held forever. From the
+ * very next second on, with no further input, the bit automatically steers
+ * itself back: every step it turns toward the bearing/pitch that would
+ * take it straight to the target end point (the same "corrective" direction
+ * shown by the red guidance arrow), but the turn RATE is capped by
+ * `stepM / minDrillRadiusM` — the same physical bend-radius constraint used
+ * everywhere else in this app — so it curves back smoothly over several
+ * seconds instead of snapping instantly. Repeated key presses just kick it
+ * further before it's finished converging. Zero kick on an axis leaves that
+ * axis already converged (matches "nothing happens without keyboard input").
  */
 export function applyManualSteering(
   currentReading: DrillingReading,
   params: ResolvedPlanningParameters,
-  steeringOffsetDeg: number,
-  verticalSteeringOffsetDeg = 0,
+  headingKickDeg: number,
+  verticalKickDeg = 0,
 ): DrillingReading[] {
   const { profile } = computePlanning(params)
   const routePoints = buildRoutePoints(params.startPoint, params.endPoint, params.waypoints)
   const totalLengthM = routeLengthM(routePoints)
   const totalDurationS = Math.max(1, Math.round((totalLengthM / AVG_ROP_M_PER_MIN) * 60))
   const stepM = AVG_ROP_M_PER_MIN / 60
-  const verticalSteeringOffsetRad = (verticalSteeringOffsetDeg * Math.PI) / 180
+  const maxTurnPerStepDeg = (stepM / params.minDrillRadiusM) * (180 / Math.PI)
+  const maxPitchTurnPerStepRad = stepM / params.minDrillRadiusM
 
   const readings: DrillingReading[] = []
   let position: GeoPoint = { lat: currentReading.lat, lng: currentReading.lng }
   let depthM = currentReading.depthM
+  let currentHeadingDeg = (currentReading.headingDeg + headingKickDeg + 360) % 360
+
+  const currentDepthBehind = interpolateDepthAtDistance(profile, Math.max(0, currentReading.distanceM - 1))
+  const currentDepthAhead = interpolateDepthAtDistance(profile, Math.min(totalLengthM, currentReading.distanceM + 1))
+  let currentPitchRad = Math.atan((currentDepthAhead - currentDepthBehind) / 2) + (verticalKickDeg * Math.PI) / 180
 
   for (let s = currentReading.elapsedS + 1; s <= totalDurationS; s++) {
+    const desiredHeadingDeg = bearingDeg(position, params.endPoint)
+    const headingDelta = signedAngleDiffDeg(desiredHeadingDeg, currentHeadingDeg)
+    const clampedHeadingDelta = Math.max(-maxTurnPerStepDeg, Math.min(maxTurnPerStepDeg, headingDelta))
+    currentHeadingDeg = (currentHeadingDeg + clampedHeadingDelta + 360) % 360
+    position = moveByHeading(position, currentHeadingDeg, stepM)
+
+    const remainingLengthM = Math.max(haversineDistanceM(position, params.endPoint), 0.01)
+    const desiredPitchRad = Math.atan(-depthM / remainingLengthM)
+    const pitchDelta = desiredPitchRad - currentPitchRad
+    const clampedPitchDelta = Math.max(-maxPitchTurnPerStepRad, Math.min(maxPitchTurnPerStepRad, pitchDelta))
+    currentPitchRad += clampedPitchDelta
+    depthM = Math.max(0, depthM + Math.tan(currentPitchRad) * stepM)
+
     const t = Math.min(1, s / totalDurationS)
     const referenceDistanceM = t * totalLengthM
-
-    const behindPoint = pointAtDistance(routePoints, Math.max(0, referenceDistanceM - 1))
-    const aheadPoint = pointAtDistance(routePoints, Math.min(totalLengthM, referenceDistanceM + 1))
-    const plannedHeadingHereDeg = bearingDeg(behindPoint, aheadPoint)
-    const headingDeg = (plannedHeadingHereDeg + steeringOffsetDeg + 360) % 360
-    position = moveByHeading(position, headingDeg, stepM)
-
-    const plannedDepthBehind = interpolateDepthAtDistance(profile, Math.max(0, referenceDistanceM - 1))
-    const plannedDepthAhead = interpolateDepthAtDistance(profile, Math.min(totalLengthM, referenceDistanceM + 1))
-    const plannedSlope = (plannedDepthAhead - plannedDepthBehind) / 2
-    const steeredSlope = Math.tan(Math.atan(plannedSlope) + verticalSteeringOffsetRad)
-    depthM = Math.max(0, depthM + steeredSlope * stepM)
-
     const referencePoint = pointAtDistance(routePoints, referenceDistanceM)
     const plannedDepthHereM = interpolateDepthAtDistance(profile, referenceDistanceM)
 
@@ -178,7 +191,7 @@ export function applyManualSteering(
       lng: position.lng,
       depthM,
       speedMPerMin: Math.max(0.1, AVG_ROP_M_PER_MIN + pseudoNoise(s * 2.3) * 0.15),
-      headingDeg,
+      headingDeg: currentHeadingDeg,
       forceKn: Math.max(10, BASE_FORCE_KN + depthM * 1.5 + pseudoNoise(s * 3.1) * 8),
       lateralDeviationM: haversineDistanceM(position, referencePoint),
       verticalDeviationM: depthM - plannedDepthHereM,

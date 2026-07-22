@@ -293,12 +293,14 @@ projectsRouter.post('/:id/drilling-session/replan', async (req, res, next) => {
   }
 })
 
-// "Manuelle Steuerung" Testlauf mode: the Bauleiter holds a course
-// correction via the keyboard (Draufsicht Pfeiltasten) instead of the
-// automatic drift model. Persists the steered tail into the session so it
-// survives a page reload/poll the same way a real correction would, and so
-// a later /replan trigger reads a currentReading that reflects the actual
-// steered position rather than the original (unsteered) precomputed one.
+// "Manuelle Steuerung" Testlauf mode: a keypress is a one-off kick to the
+// bit's current heading/pitch (see applyManualSteering) — from the next
+// second on, with no further input, it automatically curves back toward
+// the target on its own. Persists the regenerated tail into the session so
+// it survives a page reload/poll the same way a real correction would, and
+// so a later /replan trigger (still watching for a threshold crossing, as
+// an extra safety net if repeated kicks outpace the self-correction) reads
+// a currentReading that reflects where the bit actually is.
 projectsRouter.post('/:id/drilling-session/steer', async (req, res, next) => {
   try {
     const project = await requireOwnedProject(req.params.id, req.userId!, res)
@@ -314,20 +316,20 @@ projectsRouter.post('/:id/drilling-session/steer', async (req, res, next) => {
     }
 
     const atElapsedS = Number(req.body?.atElapsedS)
-    const steeringOffsetDeg = Number(req.body?.steeringOffsetDeg)
-    const verticalSteeringOffsetDeg = Number(req.body?.verticalSteeringOffsetDeg ?? 0)
+    const headingKickDeg = Number(req.body?.headingKickDeg ?? 0)
+    const verticalKickDeg = Number(req.body?.verticalKickDeg ?? 0)
     const currentReading = session.readings[atElapsedS]
     if (
       !Number.isInteger(atElapsedS) ||
       !currentReading ||
-      !Number.isFinite(steeringOffsetDeg) ||
-      !Number.isFinite(verticalSteeringOffsetDeg)
+      !Number.isFinite(headingKickDeg) ||
+      !Number.isFinite(verticalKickDeg)
     ) {
-      res.status(400).json({ error: 'atElapsedS/steeringOffsetDeg/verticalSteeringOffsetDeg invalid for this session' })
+      res.status(400).json({ error: 'atElapsedS/headingKickDeg/verticalKickDeg invalid for this session' })
       return
     }
 
-    const newTail = applyManualSteering(currentReading, project.parameters, steeringOffsetDeg, verticalSteeringOffsetDeg)
+    const newTail = applyManualSteering(currentReading, project.parameters, headingKickDeg, verticalKickDeg)
     const splicedReadings = [...session.readings.slice(0, atElapsedS + 1), ...newTail]
     await updateSessionReadings(session.id, splicedReadings)
 

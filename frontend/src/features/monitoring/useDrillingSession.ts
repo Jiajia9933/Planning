@@ -56,8 +56,11 @@ export function useDrillingSession(projectId: string | null) {
   const [newPlanPoints, setNewPlanPoints] = useState<GeoPoint[] | null>(null)
   const [turnWarning, setTurnWarning] = useState<string | null>(null)
   const [replanTriggerIndex, setReplanTriggerIndex] = useState<number | null>(null)
-  const [steeringOffsetDeg, setSteeringOffsetDeg] = useState(0)
-  const [verticalSteeringOffsetDeg, setVerticalSteeringOffsetDeg] = useState(0)
+  // Last kick applied on each axis — display-only feedback (the kick itself
+  // is one-off; the bit is already converging back before this even
+  // re-renders), not a held state.
+  const [lastHeadingKickDeg, setLastHeadingKickDeg] = useState<number | null>(null)
+  const [lastVerticalKickDeg, setLastVerticalKickDeg] = useState<number | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastIndexRef = useRef(-1)
   const hasReplannedRef = useRef(false)
@@ -65,11 +68,6 @@ export function useDrillingSession(projectId: string | null) {
   // merged history within the same poll tick, and React state updates
   // aren't synchronous.
   const readingsRef = useRef<DrillingReading[]>([])
-  // Same synchronous-access reason as readingsRef — rapid repeated key
-  // presses must each see the previous press's cumulative offset, not a
-  // stale value from before React re-renders.
-  const steeringOffsetDegRef = useRef(0)
-  const verticalSteeringOffsetDegRef = useRef(0)
   const manualModeRef = useRef(false)
 
   const stopPolling = useCallback(() => {
@@ -104,37 +102,34 @@ export function useDrillingSession(projectId: string | null) {
     [projectId],
   )
 
-  // "Manuelle Steuerung": each key press holds a new cumulative rudder
-  // angle relative to the plan — persisted server-side (see the /steer
-  // route) so a later /replan trigger reads a currentReading that reflects
-  // where the bit actually steered to, not the original unsteered plan.
-  // Every call sends *both* axes' current cumulative offset, since /steer
-  // recomputes the whole tail from scratch — it has no memory of "the
-  // other axis" between calls.
-  const sendSteer = useCallback(async () => {
-    if (!projectId || readingsRef.current.length === 0) return
-    const atElapsedS = readingsRef.current[readingsRef.current.length - 1].elapsedS
-    try {
-      await apiFetch(`/api/projects/${projectId}/drilling-session/steer`, {
-        method: 'POST',
-        body: {
-          atElapsedS,
-          steeringOffsetDeg: steeringOffsetDegRef.current,
-          verticalSteeringOffsetDeg: verticalSteeringOffsetDegRef.current,
-        },
-      })
-    } catch {
-      // Non-fatal — a dropped steering command just leaves the run on
-      // whatever course was already persisted; the next key press retries.
-    }
-  }, [projectId])
+  // "Manuelle Steuerung": each key press is a one-off kick to the bit's
+  // current heading/pitch — persisted server-side (see the /steer route),
+  // which regenerates the tail so it automatically curves back toward the
+  // target from the next second on, no held rudder involved. A later
+  // /replan trigger (if repeated kicks outpace the self-correction) reads
+  // a currentReading that reflects wherever the bit actually is.
+  const sendSteer = useCallback(
+    async (headingKickDeg: number, verticalKickDeg: number) => {
+      if (!projectId || readingsRef.current.length === 0) return
+      const atElapsedS = readingsRef.current[readingsRef.current.length - 1].elapsedS
+      try {
+        await apiFetch(`/api/projects/${projectId}/drilling-session/steer`, {
+          method: 'POST',
+          body: { atElapsedS, headingKickDeg, verticalKickDeg },
+        })
+      } catch {
+        // Non-fatal — a dropped steering command just leaves the run on
+        // whatever course was already persisted; the next key press retries.
+      }
+    },
+    [projectId],
+  )
 
   const steer = useCallback(
     (deltaDeg: number) => {
       if (!manualModeRef.current) return
-      steeringOffsetDegRef.current += deltaDeg
-      setSteeringOffsetDeg(steeringOffsetDegRef.current)
-      void sendSteer()
+      setLastHeadingKickDeg(deltaDeg)
+      void sendSteer(deltaDeg, 0)
     },
     [sendSteer],
   )
@@ -142,9 +137,8 @@ export function useDrillingSession(projectId: string | null) {
   const steerVertical = useCallback(
     (deltaDeg: number) => {
       if (!manualModeRef.current) return
-      verticalSteeringOffsetDegRef.current += deltaDeg
-      setVerticalSteeringOffsetDeg(verticalSteeringOffsetDegRef.current)
-      void sendSteer()
+      setLastVerticalKickDeg(deltaDeg)
+      void sendSteer(0, deltaDeg)
     },
     [sendSteer],
   )
@@ -213,13 +207,11 @@ export function useDrillingSession(projectId: string | null) {
       setNewPlanPoints(null)
       setTurnWarning(null)
       setReplanTriggerIndex(null)
-      setSteeringOffsetDeg(0)
-      setVerticalSteeringOffsetDeg(0)
+      setLastHeadingKickDeg(null)
+      setLastVerticalKickDeg(null)
       lastIndexRef.current = -1
       hasReplannedRef.current = false
       readingsRef.current = []
-      steeringOffsetDegRef.current = 0
-      verticalSteeringOffsetDegRef.current = 0
       manualModeRef.current = manualMode
       try {
         await apiFetch(`/api/projects/${projectId}/drilling-session/start`, { method: 'POST', body: { manualMode } })
@@ -244,8 +236,8 @@ export function useDrillingSession(projectId: string | null) {
     newPlanPoints,
     turnWarning,
     replanTriggerIndex,
-    steeringOffsetDeg,
-    verticalSteeringOffsetDeg,
+    lastHeadingKickDeg,
+    lastVerticalKickDeg,
     steer,
     steerVertical,
     start,
