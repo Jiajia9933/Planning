@@ -6,7 +6,7 @@ import { buildDrillRouteFeature } from './mockGeometry'
 import { getUtilityFeatureCollection } from './spartenplan/spartenplanSource'
 import type { GeoPoint, ResolvedPlanningParameters, ProfileSample, UtilityCrossing, UtilityType } from './types'
 
-export function interpolateDepthAtDistance(profile: ProfileSample[], distanceM: number): number {
+function interpolateDepthAtDistance(profile: ProfileSample[], distanceM: number): number {
   if (profile.length === 0) return 0
   if (distanceM <= profile[0].distanceM) {
     return profile[0].terrainHeightM - profile[0].drillPathHeightM
