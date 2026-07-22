@@ -10,7 +10,6 @@ import { Info3DPanel } from '../features/viewer3d/Info3DPanel'
 import { DatenPanel } from '../features/daten/DatenPanel'
 import { ProjektPanel } from '../features/projects/ProjektPanel'
 import { BerichtePanel } from '../features/berichte/BerichtePanel'
-import { MonitoringPanel } from '../features/monitoring/MonitoringPanel'
 import { colors } from '../theme/tokens'
 import { usePlanningStore } from '../store/planningStore'
 import { downloadFile } from '../domain/fileDownload'
@@ -78,10 +77,6 @@ export function AppShell() {
       ) : activeNavId === 'berichte' ? (
         <Box className={styles.dataPage}>
           <BerichtePanel />
-        </Box>
-      ) : activeNavId === 'monitoring' ? (
-        <Box className={styles.dataPage}>
-          <MonitoringPanel />
         </Box>
       ) : (
         <>
