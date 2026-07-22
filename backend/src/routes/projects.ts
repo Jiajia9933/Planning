@@ -281,8 +281,7 @@ projectsRouter.post('/:id/drilling-session/replan', async (req, res, next) => {
 
     const { newPlanPoints, readings: newTail, turnWarning } = replanFromCurrentPosition(
       triggerReading,
-      project.parameters.endPoint,
-      project.parameters.minDrillRadiusM,
+      project.parameters,
     )
     const splicedReadings = [...session.readings.slice(0, triggerElapsedS), ...newTail]
     await updateSessionReadings(session.id, splicedReadings)

@@ -111,36 +111,80 @@ export interface ReplanResult {
 }
 
 /**
+ * Fits `depth(d) = p0 + s0·d + a·d²` so it starts at the bit's actual
+ * current depth *and* current slope (no discontinuity at d=0 — this is
+ * what avoids the sudden kink a naive linear taper produces) and reaches
+ * depth 0 at `remainingLengthM`. Closed-form, no spline library — same
+ * "explainable placeholder formula" style as the sag curve in
+ * planningEngine.ts, just fit to different boundary conditions.
+ */
+function fitQuadraticDepthTaper(p0: number, s0: number, remainingLengthM: number) {
+  const L = Math.max(remainingLengthM, 1e-6)
+  const a = -(p0 + s0 * L) / (L * L)
+  return {
+    depthAt: (d: number) => p0 + s0 * d + a * d * d,
+    exitSlope: s0 + 2 * a * L,
+  }
+}
+
+/**
  * Computes a corrected path from wherever the bit actually is back to the
  * original end point, and regenerates telemetry for the rest of the run
- * following *that* line instead of the original plan. Deliberately matches
- * `routeOptimizer.ts`'s level of rigor, not a new one: a straight
- * reconnection (nothing to route around here, unlike Flurstücke avoidance)
- * with the same tangent-length turn-radius check, applied automatically —
- * flagged if too sharp, never blocked, matching "auto-correct, no
- * confirmation."
+ * following *that* line instead of the original plan. Two independent
+ * safety checks, both flagged (never blocking — matches "auto-correct, no
+ * confirmation"): a horizontal one (matches `routeOptimizer.ts`'s
+ * tangent-length turn-radius check against the heading change) and a
+ * vertical one (the taper's exit angle against `exitAngleDeg` — the
+ * remaining distance might just not be enough to surface gently).
  */
 export function replanFromCurrentPosition(
   currentReading: DrillingReading,
-  originalEndPoint: GeoPoint,
-  minDrillRadiusM: number,
+  params: ResolvedPlanningParameters,
 ): ReplanResult {
+  const { profile } = computePlanning(params)
+  const originalRoutePoints = buildRoutePoints(params.startPoint, params.endPoint, params.waypoints)
+  const originalTotalLengthM = routeLengthM(originalRoutePoints)
+
   const currentPosition: GeoPoint = { lat: currentReading.lat, lng: currentReading.lng }
-  const newPlanPoints: GeoPoint[] = [currentPosition, originalEndPoint]
-  const remainingLengthM = haversineDistanceM(currentPosition, originalEndPoint)
+  const newPlanPoints: GeoPoint[] = [currentPosition, params.endPoint]
+  const remainingLengthM = haversineDistanceM(currentPosition, params.endPoint)
   const remainingDurationS = Math.max(1, Math.round((remainingLengthM / AVG_ROP_M_PER_MIN) * 60))
 
-  // Same tangent-length-to-inscribed-arc formula as routeOptimizer.ts's
-  // radiusWarnings — deflection from the bit's actual current heading into
-  // the new straight line, checked against the available distance.
+  // The *planned* profile's local depth slope at the trigger distance —
+  // same centered-window trick already used for heading — stands in for
+  // the bit's actual current pitch, since the real per-second vertical
+  // deviation is itself only ever a small addition on top of the plan.
+  const depthBehind = interpolateDepthAtDistance(profile, Math.max(0, currentReading.distanceM - 1))
+  const depthAhead = interpolateDepthAtDistance(profile, Math.min(originalTotalLengthM, currentReading.distanceM + 1))
+  const currentSlope = (depthAhead - depthBehind) / 2
+
+  const { depthAt, exitSlope } = fitQuadraticDepthTaper(currentReading.depthM, currentSlope, remainingLengthM)
+
+  const warnings: string[] = []
+
+  // Horizontal: same tangent-length-to-inscribed-arc formula as
+  // routeOptimizer.ts's radiusWarnings.
   const newInitialHeadingDeg = bearingDeg(currentPosition, pointAtDistance(newPlanPoints, Math.min(remainingLengthM, 1)))
   const rawDeltaDeg = Math.abs(newInitialHeadingDeg - currentReading.headingDeg) % 360
-  const deflectionDeg = rawDeltaDeg > 180 ? 360 - rawDeltaDeg : rawDeltaDeg
-  const requiredApproachM = minDrillRadiusM * Math.tan(((deflectionDeg * Math.PI) / 180) / 2)
-  const turnWarning =
-    deflectionDeg > 0.01 && requiredApproachM > Math.min(remainingLengthM, 5)
-      ? `Die Kurskorrektur erfordert eine engere Kurve als der minimale Bohrradius (${minDrillRadiusM} m) zulässt — bitte prüfen.`
-      : null
+  const headingDeflectionDeg = rawDeltaDeg > 180 ? 360 - rawDeltaDeg : rawDeltaDeg
+  const requiredApproachM = params.minDrillRadiusM * Math.tan(((headingDeflectionDeg * Math.PI) / 180) / 2)
+  if (headingDeflectionDeg > 0.01 && requiredApproachM > Math.min(remainingLengthM, 5)) {
+    warnings.push(
+      `Die Kurskorrektur erfordert eine engere seitliche Kurve als der minimale Bohrradius (${params.minDrillRadiusM} m) zulässt.`,
+    )
+  }
+
+  // Vertical: does the taper actually manage to flatten out enough by the
+  // time it reaches the surface, or is the remaining distance just too
+  // short for how deep the bit currently is?
+  const exitAngleDeg = Math.abs((Math.atan(exitSlope) * 180) / Math.PI)
+  if (exitAngleDeg > params.exitAngleDeg) {
+    warnings.push(
+      `Die verbleibende Strecke reicht nicht aus, um mit sicherem Austrittswinkel (max. ${params.exitAngleDeg}°) wieder an die Oberfläche zu gelangen — berechneter Winkel: ${exitAngleDeg.toFixed(1)}°.`,
+    )
+  }
+
+  const turnWarning = warnings.length > 0 ? warnings.join(' ') : null
 
   const readings: DrillingReading[] = []
   for (let i = 0; i <= remainingDurationS; i++) {
@@ -148,7 +192,7 @@ export function replanFromCurrentPosition(
     const t = i / remainingDurationS
     const distanceAlongNewM = t * remainingLengthM
     const point = pointAtDistance(newPlanPoints, distanceAlongNewM)
-    const depthM = Math.max(0, currentReading.depthM * (1 - t))
+    const depthM = Math.max(0, depthAt(distanceAlongNewM))
 
     const behindPoint = pointAtDistance(newPlanPoints, Math.max(0, distanceAlongNewM - 1))
     const aheadPoint = pointAtDistance(newPlanPoints, Math.min(remainingLengthM, distanceAlongNewM + 1))

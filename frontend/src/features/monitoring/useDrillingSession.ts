@@ -1,13 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DrillingReading, GeoPoint } from '@hdd-planner/domain'
 import { apiFetch } from '../auth/api'
-import { DEVIATION_WARN_M } from './constants'
+import {
+  DEVIATION_WARN_M,
+  TREND_WINDOW_S,
+  TREND_MIN_GROWTH_M,
+  TREND_MIN_ABSOLUTE_M,
+  TREND_NOISE_TOLERANCE_M,
+} from './constants'
 
 interface LiveResponse {
   newReadings: DrillingReading[]
   currentIndex: number
   totalReadings: number
   isComplete: boolean
+}
+
+type DeviationKey = 'lateralDeviationM' | 'verticalDeviationM'
+
+/** True once |deviation| has been consistently growing over the trailing window and has cleared a small absolute floor — fires well before the hard DEVIATION_WARN_M ceiling, as soon as a real trend (not just noise) is clear. */
+function isTrendingAway(recent: DrillingReading[], key: DeviationKey): boolean {
+  if (recent.length < TREND_WINDOW_S) return false
+  const window = recent.slice(-TREND_WINDOW_S).map((r) => Math.abs(r[key]))
+  const growing = window.every((v, i) => i === 0 || v >= window[i - 1] - TREND_NOISE_TOLERANCE_M)
+  const grew = window[window.length - 1] - window[0] >= TREND_MIN_GROWTH_M
+  const aboveFloor = window[window.length - 1] >= TREND_MIN_ABSOLUTE_M
+  return growing && grew && aboveFloor
 }
 
 interface ReplanResponse {
@@ -41,6 +59,10 @@ export function useDrillingSession(projectId: string | null) {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastIndexRef = useRef(-1)
   const hasReplannedRef = useRef(false)
+  // Mirrors `readings` state synchronously — the trend check needs the
+  // merged history within the same poll tick, and React state updates
+  // aren't synchronous.
+  const readingsRef = useRef<DrillingReading[]>([])
 
   const stopPolling = useCallback(() => {
     if (intervalRef.current) {
@@ -82,11 +104,23 @@ export function useDrillingSession(projectId: string | null) {
       )
       if (data.newReadings.length > 0) {
         lastIndexRef.current = data.currentIndex
-        setReadings((prev) => [...prev, ...data.newReadings])
+        const startIdx = readingsRef.current.length
+        readingsRef.current = [...readingsRef.current, ...data.newReadings]
+        setReadings(readingsRef.current)
 
         if (!hasReplannedRef.current) {
-          const deviating = data.newReadings.find((r) => r.lateralDeviationM >= DEVIATION_WARN_M)
-          if (deviating) void triggerReplan(deviating)
+          for (let i = startIdx; i < readingsRef.current.length; i++) {
+            const reading = readingsRef.current[i]
+            const crossedThreshold =
+              reading.lateralDeviationM >= DEVIATION_WARN_M || Math.abs(reading.verticalDeviationM) >= DEVIATION_WARN_M
+            const windowSoFar = readingsRef.current.slice(0, i + 1)
+            const trending =
+              isTrendingAway(windowSoFar, 'lateralDeviationM') || isTrendingAway(windowSoFar, 'verticalDeviationM')
+            if (crossedThreshold || trending) {
+              void triggerReplan(reading)
+              break
+            }
+          }
         }
       }
       setTotalReadings(data.totalReadings)
@@ -110,6 +144,7 @@ export function useDrillingSession(projectId: string | null) {
     setReplanTriggerIndex(null)
     lastIndexRef.current = -1
     hasReplannedRef.current = false
+    readingsRef.current = []
     try {
       await apiFetch(`/api/projects/${projectId}/drilling-session/start`, { method: 'POST' })
       setIsRunning(true)
