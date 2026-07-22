@@ -96,9 +96,17 @@ export function computeGuidanceArrows(
   const headingRadiusOk = !(headingDeflectionDeg > 0.01 && requiredApproachM > Math.min(remainingLengthM, 5))
   const correctiveHeadingFeasible = headingRadiusOk && optimized.warnings.length === 0
 
+  // Chainage-based remaining distance, NOT haversineDistanceM(currentPosition,
+  // endPoint) — that would make this depend on the bit's lateral position,
+  // so a horizontal-only steer would silently swing the vertical corrective
+  // arrow too. totalLengthM comes from the profile's own last sample (same
+  // route the profile was built from), never from where the bit actually is.
+  const totalLengthM = profile.length > 0 ? profile[profile.length - 1].distanceM : 0
+  const remainingReferenceLengthM = Math.max(totalLengthM - latest.distanceM, 0.01)
+
   // Straight chord from the bit's actual current depth back to the surface
   // at the target end point — negative (climbing) once depth > 0.
-  const correctiveVerticalAngleDeg = (Math.atan(-latest.depthM / remainingLengthM) * 180) / Math.PI
+  const correctiveVerticalAngleDeg = (Math.atan(-latest.depthM / remainingReferenceLengthM) * 180) / Math.PI
   const correctiveVerticalFeasible = Math.abs(correctiveVerticalAngleDeg) <= exitAngleDeg
 
   // Ist and Geplant already coincide (within the simulator's own noise
