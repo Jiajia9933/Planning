@@ -1,12 +1,14 @@
 import { Router } from 'express'
 import type { Response } from 'express'
+import { generateDrillingSession, replanFromCurrentPosition } from '@hdd-planner/domain'
 import { requireAuth } from '../middleware/auth'
-import { isPlanningParameters, isFeatureCollection } from '../validators'
+import { isPlanningParameters, isResolvedPlanningParameters, isFeatureCollection } from '../validators'
 import { createProject, findProjectsByUserId, findOwnedProject, updateProjectParameters } from '../repositories/projectRepository'
 import { defaultParameters } from '../db/defaultParameters'
 import { upsertSpartenplan, findSpartenplanByProjectId, clearSpartenplan } from '../repositories/spartenplanRepository'
 import { upsertParcels, findParcelsByProjectId, clearParcels } from '../repositories/parcelRepository'
 import { createReport, findReportsByProjectId, findReportFile } from '../repositories/reportRepository'
+import { createSession, findLatestSession, updateSessionReadings } from '../repositories/drillingSessionRepository'
 
 export const projectsRouter = Router()
 projectsRouter.use(requireAuth)
@@ -190,6 +192,102 @@ projectsRouter.get('/:id/reports/:reportId', async (req, res, next) => {
     res.setHeader('Content-Type', 'application/pdf')
     res.setHeader('Content-Disposition', `attachment; filename="${file.projectName.replace(/"/g, '')}-bericht.pdf"`)
     res.send(file.fileData)
+  } catch (err) {
+    next(err)
+  }
+})
+
+// A typical bore takes tens of minutes to hours at real pilot-bore ROP —
+// 200x makes even a longer one play out in a couple of real minutes.
+const DEFAULT_PLAYBACK_SPEED = 200
+
+projectsRouter.post('/:id/drilling-session/start', async (req, res, next) => {
+  try {
+    const project = await requireOwnedProject(req.params.id, req.userId!, res)
+    if (!project) return
+    if (!isResolvedPlanningParameters(project.parameters)) {
+      res.status(400).json({ error: 'Start- und Zielpunkt müssen gesetzt sein, bevor ein Testlauf gestartet werden kann' })
+      return
+    }
+    const readings = generateDrillingSession(project.parameters)
+    const session = await createSession(project.id, DEFAULT_PLAYBACK_SPEED, readings)
+    res.status(201).json({
+      startedAt: session.startedAt,
+      playbackSpeed: session.playbackSpeed,
+      totalReadings: readings.length,
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// Pure function of wall-clock time — no server-side timer keeps this
+// running between polls, so it naturally resumes correctly across page
+// reloads or backend restarts as long as the session row still exists.
+projectsRouter.get('/:id/drilling-session/live', async (req, res, next) => {
+  try {
+    const project = await requireOwnedProject(req.params.id, req.userId!, res)
+    if (!project) return
+    const session = await findLatestSession(project.id)
+    if (!session) {
+      res.status(404).json({ error: 'No drilling session found for this project' })
+      return
+    }
+
+    const sinceIndex = Number(req.query.sinceIndex ?? -1)
+    const realElapsedS = (Date.now() - session.startedAt.getTime()) / 1000
+    const simIndex = Math.min(
+      session.readings.length - 1,
+      Math.max(0, Math.floor(realElapsedS * session.playbackSpeed)),
+    )
+    const newReadings = session.readings.slice(Math.max(0, sinceIndex + 1), simIndex + 1)
+
+    res.json({
+      newReadings,
+      currentIndex: simIndex,
+      totalReadings: session.readings.length,
+      isComplete: simIndex >= session.readings.length - 1,
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// Triggered automatically by the frontend the instant it sees a deviation
+// cross the warn threshold — no confirmation step (see the Überwachung
+// plan). Splices a freshly-generated corrected tail onto the existing
+// session from the trigger point onward; the /live endpoint above needs no
+// changes since it just re-reads whatever is currently stored.
+projectsRouter.post('/:id/drilling-session/replan', async (req, res, next) => {
+  try {
+    const project = await requireOwnedProject(req.params.id, req.userId!, res)
+    if (!project) return
+    if (!isResolvedPlanningParameters(project.parameters)) {
+      res.status(400).json({ error: 'Start- und Zielpunkt müssen gesetzt sein' })
+      return
+    }
+    const session = await findLatestSession(project.id)
+    if (!session) {
+      res.status(404).json({ error: 'No drilling session found for this project' })
+      return
+    }
+
+    const triggerElapsedS = Number(req.body?.triggerElapsedS)
+    const triggerReading = session.readings[triggerElapsedS]
+    if (!Number.isInteger(triggerElapsedS) || !triggerReading) {
+      res.status(400).json({ error: 'triggerElapsedS is not a valid index into this session' })
+      return
+    }
+
+    const { newPlanPoints, readings: newTail, turnWarning } = replanFromCurrentPosition(
+      triggerReading,
+      project.parameters.endPoint,
+      project.parameters.minDrillRadiusM,
+    )
+    const splicedReadings = [...session.readings.slice(0, triggerElapsedS), ...newTail]
+    await updateSessionReadings(session.id, splicedReadings)
+
+    res.json({ newPlanPoints, turnWarning, triggerIndex: triggerElapsedS })
   } catch (err) {
     next(err)
   }
