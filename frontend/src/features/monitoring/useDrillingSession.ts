@@ -163,7 +163,16 @@ export function useDrillingSession(projectId: string | null) {
         let batch = data.newReadings
         consumedThroughIndex = data.currentIndex
 
-        if (!hasReplannedRef.current) {
+        // Manual mode already self-corrects per kick (see applyManualSteering) —
+        // it tracks each axis's frozen/converging state explicitly. This
+        // discrete trigger predates that and always "corrects" *both* axes
+        // via a straight chord + quadratic depth taper, with no concept of
+        // an axis that was never touched — firing it here would silently
+        // un-freeze and overwrite whichever axis the Bauleiter never
+        // steered, which is exactly the bug reported: a pure horizontal
+        // kick crossing the deviation threshold triggered this, and it
+        // replaced the frozen depth with a fresh (and wrong) taper.
+        if (!hasReplannedRef.current && !manualModeRef.current) {
           for (let i = 0; i < batch.length; i++) {
             const reading = batch[i]
             const crossedThreshold =
