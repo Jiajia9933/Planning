@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import type { KeyboardEvent } from 'react'
 import { Box, Stack, Typography } from '@mui/material'
 import { buildRoutePoints } from '@hdd-planner/domain'
 import type { DrillingReading, GeoPoint } from '@hdd-planner/domain'
@@ -19,7 +20,11 @@ interface DraufsichtViewProps {
   readings: DrillingReading[]
   replanTriggerIndex: number | null
   guidance: GuidanceArrows | null
+  manualMode?: boolean
+  onSteer?: (deltaDeg: number) => void
 }
+
+const STEER_STEP_DEG = 15
 
 /** North (increasing lat) is up in this view — see toLocalMeters/project. */
 function headingToDelta(headingDeg: number, lengthPx: number): { dx: number; dy: number } {
@@ -35,7 +40,16 @@ function toLocalMeters(point: GeoPoint, origin: GeoPoint): { x: number; y: numbe
 }
 
 /** Plan-view (bird's-eye) of the planned route vs. the actual simulated trail — local-planar projection, same simplification used throughout this codebase (lineIntersection.ts, routeOptimizer.ts), not a real map. */
-export function DraufsichtView({ startPoint, endPoint, waypoints, readings, replanTriggerIndex, guidance }: DraufsichtViewProps) {
+export function DraufsichtView({
+  startPoint,
+  endPoint,
+  waypoints,
+  readings,
+  replanTriggerIndex,
+  guidance,
+  manualMode,
+  onSteer,
+}: DraufsichtViewProps) {
   const layout = useMemo(() => {
     const origin = startPoint
     const plannedPoints = buildRoutePoints(startPoint, endPoint, waypoints)
@@ -84,21 +98,48 @@ export function DraufsichtView({ startPoint, endPoint, waypoints, readings, repl
 
   const latest = readings.length > 0 ? readings[readings.length - 1] : null
 
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (!onSteer) return
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      onSteer(-STEER_STEP_DEG)
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      onSteer(STEER_STEP_DEG)
+    }
+  }
+
   return (
     <Box>
-      <Typography variant="caption" color={colors.textMuted} sx={{ fontWeight: 700, letterSpacing: 0.5 }}>
-        DRAUFSICHT
-      </Typography>
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%" height={HEIGHT}>
+      <Stack direction="row" sx={{ alignItems: 'baseline', gap: 1 }}>
+        <Typography variant="caption" color={colors.textMuted} sx={{ fontWeight: 700, letterSpacing: 0.5 }}>
+          DRAUFSICHT
+        </Typography>
+        {manualMode && (
+          <Typography variant="caption" color={colors.accentOrange}>
+            Klicken, dann ←/→ zum Steuern
+          </Typography>
+        )}
+      </Stack>
+      <Box
+        tabIndex={manualMode ? 0 : undefined}
+        onKeyDown={manualMode ? handleKeyDown : undefined}
+        sx={{
+          borderRadius: 1,
+          outline: 'none',
+          '&:focus-visible': manualMode ? { boxShadow: `0 0 0 2px ${colors.accentOrange}` } : undefined,
+        }}
+      >
+        <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%" height={HEIGHT}>
         <defs>
-          <marker id="arrow-planned" markerWidth={8} markerHeight={8} refX={6} refY={4} orient="auto">
-            <path d="M0,0 L8,4 L0,8 Z" fill={colors.textMuted} />
+          <marker id="arrow-planned" markerWidth={5.5} markerHeight={5.5} refX={4} refY={2.75} orient="auto">
+            <path d="M0,0 L5.5,2.75 L0,5.5 Z" fill={colors.textMuted} />
           </marker>
-          <marker id="arrow-actual" markerWidth={8} markerHeight={8} refX={6} refY={4} orient="auto">
-            <path d="M0,0 L8,4 L0,8 Z" fill={colors.accentBlue} />
+          <marker id="arrow-actual" markerWidth={5.5} markerHeight={5.5} refX={4} refY={2.75} orient="auto">
+            <path d="M0,0 L5.5,2.75 L0,5.5 Z" fill={colors.accentBlue} />
           </marker>
-          <marker id="arrow-corrective" markerWidth={8} markerHeight={8} refX={6} refY={4} orient="auto">
-            <path d="M0,0 L8,4 L0,8 Z" fill={colors.accentRed} />
+          <marker id="arrow-corrective" markerWidth={5.5} markerHeight={5.5} refX={4} refY={2.75} orient="auto">
+            <path d="M0,0 L5.5,2.75 L0,5.5 Z" fill={colors.accentRed} />
           </marker>
         </defs>
         <path d={layout.plannedPath} fill="none" stroke={colors.textMuted} strokeWidth={1.5} strokeDasharray="5 4" />
@@ -123,7 +164,7 @@ export function DraufsichtView({ startPoint, endPoint, waypoints, readings, repl
                     x2={x + planned.dx}
                     y2={y + planned.dy}
                     stroke={colors.textMuted}
-                    strokeWidth={2}
+                    strokeWidth={1.25}
                     markerEnd="url(#arrow-planned)"
                   />
                   <line
@@ -132,7 +173,7 @@ export function DraufsichtView({ startPoint, endPoint, waypoints, readings, repl
                     x2={x + actual.dx}
                     y2={y + actual.dy}
                     stroke={colors.accentBlue}
-                    strokeWidth={2}
+                    strokeWidth={1.25}
                     markerEnd="url(#arrow-actual)"
                   />
                   {guidance.showCorrectiveHeading && (
@@ -142,7 +183,7 @@ export function DraufsichtView({ startPoint, endPoint, waypoints, readings, repl
                       x2={x + corrective.dx}
                       y2={y + corrective.dy}
                       stroke={colors.accentRed}
-                      strokeWidth={2}
+                      strokeWidth={1.25}
                       strokeDasharray={guidance.correctiveHeadingFeasible ? undefined : '4 3'}
                       opacity={guidance.correctiveHeadingFeasible ? 1 : 0.55}
                       markerEnd="url(#arrow-corrective)"
@@ -164,6 +205,7 @@ export function DraufsichtView({ startPoint, endPoint, waypoints, readings, repl
           />
         )}
       </svg>
+      </Box>
       <Stack direction="row" spacing={2} sx={{ mt: 0.5 }}>
         <ArrowLegend color={colors.textMuted} label="Geplant" />
         <ArrowLegend color={colors.accentBlue} label="Ist" />

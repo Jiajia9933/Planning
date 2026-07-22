@@ -69,14 +69,14 @@ export function SeitenansichtView({ profile, readings, replanTriggerIndex, guida
       </Typography>
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} width="100%" height={HEIGHT}>
         <defs>
-          <marker id="sa-arrow-planned" markerWidth={8} markerHeight={8} refX={6} refY={4} orient="auto">
-            <path d="M0,0 L8,4 L0,8 Z" fill={colors.textMuted} />
+          <marker id="sa-arrow-planned" markerWidth={5.5} markerHeight={5.5} refX={4} refY={2.75} orient="auto">
+            <path d="M0,0 L5.5,2.75 L0,5.5 Z" fill={colors.textMuted} />
           </marker>
-          <marker id="sa-arrow-actual" markerWidth={8} markerHeight={8} refX={6} refY={4} orient="auto">
-            <path d="M0,0 L8,4 L0,8 Z" fill={colors.accentBlue} />
+          <marker id="sa-arrow-actual" markerWidth={5.5} markerHeight={5.5} refX={4} refY={2.75} orient="auto">
+            <path d="M0,0 L5.5,2.75 L0,5.5 Z" fill={colors.accentBlue} />
           </marker>
-          <marker id="sa-arrow-corrective" markerWidth={8} markerHeight={8} refX={6} refY={4} orient="auto">
-            <path d="M0,0 L8,4 L0,8 Z" fill={colors.accentRed} />
+          <marker id="sa-arrow-corrective" markerWidth={5.5} markerHeight={5.5} refX={4} refY={2.75} orient="auto">
+            <path d="M0,0 L5.5,2.75 L0,5.5 Z" fill={colors.accentRed} />
           </marker>
         </defs>
         <g transform={`translate(${MARGIN.left},${MARGIN.top})`}>
@@ -101,7 +101,7 @@ export function SeitenansichtView({ profile, readings, replanTriggerIndex, guida
                       x2={x + planned.dx}
                       y2={y + planned.dy}
                       stroke={colors.textMuted}
-                      strokeWidth={2}
+                      strokeWidth={1.25}
                       markerEnd="url(#sa-arrow-planned)"
                     />
                     <line
@@ -110,7 +110,7 @@ export function SeitenansichtView({ profile, readings, replanTriggerIndex, guida
                       x2={x + actual.dx}
                       y2={y + actual.dy}
                       stroke={colors.accentBlue}
-                      strokeWidth={2}
+                      strokeWidth={1.25}
                       markerEnd="url(#sa-arrow-actual)"
                     />
                     {guidance.showCorrectiveVertical && (
@@ -120,7 +120,7 @@ export function SeitenansichtView({ profile, readings, replanTriggerIndex, guida
                         x2={x + corrective.dx}
                         y2={y + corrective.dy}
                         stroke={colors.accentRed}
-                        strokeWidth={2}
+                        strokeWidth={1.25}
                         strokeDasharray={guidance.correctiveVerticalFeasible ? undefined : '4 3'}
                         opacity={guidance.correctiveVerticalFeasible ? 1 : 0.55}
                         markerEnd="url(#sa-arrow-corrective)"

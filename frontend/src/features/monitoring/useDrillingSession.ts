@@ -56,6 +56,7 @@ export function useDrillingSession(projectId: string | null) {
   const [newPlanPoints, setNewPlanPoints] = useState<GeoPoint[] | null>(null)
   const [turnWarning, setTurnWarning] = useState<string | null>(null)
   const [replanTriggerIndex, setReplanTriggerIndex] = useState<number | null>(null)
+  const [steeringOffsetDeg, setSteeringOffsetDeg] = useState(0)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastIndexRef = useRef(-1)
   const hasReplannedRef = useRef(false)
@@ -63,6 +64,11 @@ export function useDrillingSession(projectId: string | null) {
   // merged history within the same poll tick, and React state updates
   // aren't synchronous.
   const readingsRef = useRef<DrillingReading[]>([])
+  // Same synchronous-access reason as readingsRef — rapid repeated key
+  // presses must each see the previous press's cumulative offset, not a
+  // stale value from before React re-renders.
+  const steeringOffsetDegRef = useRef(0)
+  const manualModeRef = useRef(false)
 
   const stopPolling = useCallback(() => {
     if (intervalRef.current) {
@@ -91,6 +97,30 @@ export function useDrillingSession(projectId: string | null) {
         // the correction itself fails; the deviation readout still shows
         // the truth either way, and this lets a later reading retry.
         hasReplannedRef.current = false
+      }
+    },
+    [projectId],
+  )
+
+  // "Manuelle Steuerung": each key press holds a new cumulative rudder
+  // angle relative to the plan — persisted server-side (see the /steer
+  // route) so a later /replan trigger reads a currentReading that reflects
+  // where the bit actually steered to, not the original unsteered plan.
+  const steer = useCallback(
+    async (deltaDeg: number) => {
+      if (!projectId || !manualModeRef.current || readingsRef.current.length === 0) return
+      const newOffset = steeringOffsetDegRef.current + deltaDeg
+      steeringOffsetDegRef.current = newOffset
+      setSteeringOffsetDeg(newOffset)
+      const atElapsedS = readingsRef.current[readingsRef.current.length - 1].elapsedS
+      try {
+        await apiFetch(`/api/projects/${projectId}/drilling-session/steer`, {
+          method: 'POST',
+          body: { atElapsedS, steeringOffsetDeg: newOffset },
+        })
+      } catch {
+        // Non-fatal — a dropped steering command just leaves the run on
+        // whatever course was already persisted; the next key press retries.
       }
     },
     [projectId],
@@ -134,26 +164,32 @@ export function useDrillingSession(projectId: string | null) {
     }
   }, [projectId, stopPolling, triggerReplan])
 
-  const start = useCallback(async () => {
-    if (!projectId) return
-    setError(null)
-    setReadings([])
-    setIsComplete(false)
-    setNewPlanPoints(null)
-    setTurnWarning(null)
-    setReplanTriggerIndex(null)
-    lastIndexRef.current = -1
-    hasReplannedRef.current = false
-    readingsRef.current = []
-    try {
-      await apiFetch(`/api/projects/${projectId}/drilling-session/start`, { method: 'POST' })
-      setIsRunning(true)
-      await poll()
-      intervalRef.current = setInterval(() => void poll(), 1000)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Testlauf konnte nicht gestartet werden.')
-    }
-  }, [projectId, poll])
+  const start = useCallback(
+    async (manualMode = false) => {
+      if (!projectId) return
+      setError(null)
+      setReadings([])
+      setIsComplete(false)
+      setNewPlanPoints(null)
+      setTurnWarning(null)
+      setReplanTriggerIndex(null)
+      setSteeringOffsetDeg(0)
+      lastIndexRef.current = -1
+      hasReplannedRef.current = false
+      readingsRef.current = []
+      steeringOffsetDegRef.current = 0
+      manualModeRef.current = manualMode
+      try {
+        await apiFetch(`/api/projects/${projectId}/drilling-session/start`, { method: 'POST', body: { manualMode } })
+        setIsRunning(true)
+        await poll()
+        intervalRef.current = setInterval(() => void poll(), 1000)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Testlauf konnte nicht gestartet werden.')
+      }
+    },
+    [projectId, poll],
+  )
 
   useEffect(() => stopPolling, [stopPolling])
 
@@ -166,6 +202,8 @@ export function useDrillingSession(projectId: string | null) {
     newPlanPoints,
     turnWarning,
     replanTriggerIndex,
+    steeringOffsetDeg,
+    steer,
     start,
   }
 }

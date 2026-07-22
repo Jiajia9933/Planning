@@ -31,6 +31,14 @@ function offsetPerpendicular(point: GeoPoint, headingDeg: number, offsetM: numbe
   return { lat: point.lat + dLat, lng: point.lng + dLng }
 }
 
+/** Destination point a given distance out along a compass heading — flat-projection approximation, same convention as offsetPerpendicular. */
+function moveByHeading(point: GeoPoint, headingDeg: number, distanceM: number): GeoPoint {
+  const rad = (headingDeg * Math.PI) / 180
+  const dLat = (Math.cos(rad) * distanceM) / METERS_PER_DEGREE
+  const dLng = (Math.sin(rad) * distanceM) / (METERS_PER_DEGREE * Math.cos((point.lat * Math.PI) / 180))
+  return { lat: point.lat + dLat, lng: point.lng + dLng }
+}
+
 /**
  * Deterministic drift envelope, not pure randomness — matches this
  * codebase's preference for explainable simplified models. Ramps up
@@ -55,8 +63,17 @@ function pseudoNoise(seed: number): number {
  * "actual" position at each second is the planned route's own point at
  * that distance, offset sideways by a deliberately-injected deviation, so
  * downstream Soll-Ist comparison has something real to show.
+ *
+ * `manualDrift: true` (the "manuelle Steuerung" Testlauf mode) suppresses
+ * this automatic drift entirely — the bit stays exactly on the planned
+ * line until the Bauleiter steers it themselves via `applyManualSteering`,
+ * matching that mode's whole premise (nothing happens without keyboard
+ * input).
  */
-export function generateDrillingSession(params: ResolvedPlanningParameters): DrillingReading[] {
+export function generateDrillingSession(
+  params: ResolvedPlanningParameters,
+  options?: { manualDrift?: boolean },
+): DrillingReading[] {
   const { profile } = computePlanning(params)
   const routePoints = buildRoutePoints(params.startPoint, params.endPoint, params.waypoints)
   const totalLengthM = routeLengthM(routePoints)
@@ -70,8 +87,8 @@ export function generateDrillingSession(params: ResolvedPlanningParameters): Dri
     const plannedPoint = pointAtDistance(routePoints, distanceM)
     const plannedDepthM = interpolateDepthAtDistance(profile, distanceM)
 
-    const lateralOffsetM = driftEnvelope(t) * 4.5 + pseudoNoise(s) * 0.15
-    const verticalDeviationM = driftEnvelope(t) * 1.8 + pseudoNoise(s * 1.7) * 0.08
+    const lateralOffsetM = options?.manualDrift ? 0 : driftEnvelope(t) * 4.5 + pseudoNoise(s) * 0.15
+    const verticalDeviationM = options?.manualDrift ? 0 : driftEnvelope(t) * 1.8 + pseudoNoise(s * 1.7) * 0.08
 
     // A ~2m centered window along the *planned* route gives a numerically
     // stable heading — the per-second movement of the actual point itself
@@ -95,6 +112,68 @@ export function generateDrillingSession(params: ResolvedPlanningParameters): Dri
       headingDeg,
       forceKn: Math.max(10, BASE_FORCE_KN + plannedDepthM * 1.5 + pseudoNoise(s * 3.1) * 8),
       lateralDeviationM: Math.abs(lateralOffsetM),
+      verticalDeviationM,
+    })
+  }
+
+  return readings
+}
+
+/**
+ * Regenerates the readings tail from `currentReading` onward under manual
+ * keyboard steering ("manuelle Steuerung" Testlauf mode): at every future
+ * second, the actual heading is the *planned* route's own heading at that
+ * point in (elapsed-time-mapped) chainage plus a constant steering offset —
+ * a held rudder angle, not a one-off nudge, so a sustained non-zero offset
+ * drifts the bit further and further from the plan each second, same as
+ * really holding a course correction would. Position is dead-reckoned step
+ * by step from the bit's actual current position (unlike the automatic-
+ * drift model's offset-from-the-planned-line-at-this-distance approach,
+ * which stops making sense once the bit has actually turned away — "1m
+ * ahead on the original line" is no longer where it's heading). Depth
+ * keeps following the planned profile exactly — no vertical steering yet.
+ */
+export function applyManualSteering(
+  currentReading: DrillingReading,
+  params: ResolvedPlanningParameters,
+  steeringOffsetDeg: number,
+): DrillingReading[] {
+  const { profile } = computePlanning(params)
+  const routePoints = buildRoutePoints(params.startPoint, params.endPoint, params.waypoints)
+  const totalLengthM = routeLengthM(routePoints)
+  const totalDurationS = Math.max(1, Math.round((totalLengthM / AVG_ROP_M_PER_MIN) * 60))
+  const stepM = AVG_ROP_M_PER_MIN / 60
+
+  const readings: DrillingReading[] = []
+  let position: GeoPoint = { lat: currentReading.lat, lng: currentReading.lng }
+
+  for (let s = currentReading.elapsedS + 1; s <= totalDurationS; s++) {
+    const t = Math.min(1, s / totalDurationS)
+    const referenceDistanceM = t * totalLengthM
+
+    const behindPoint = pointAtDistance(routePoints, Math.max(0, referenceDistanceM - 1))
+    const aheadPoint = pointAtDistance(routePoints, Math.min(totalLengthM, referenceDistanceM + 1))
+    const plannedHeadingHereDeg = bearingDeg(behindPoint, aheadPoint)
+    const headingDeg = (plannedHeadingHereDeg + steeringOffsetDeg + 360) % 360
+
+    position = moveByHeading(position, headingDeg, stepM)
+
+    const plannedDepthM = interpolateDepthAtDistance(profile, referenceDistanceM)
+    const verticalDeviationM = pseudoNoise(s * 1.7) * 0.08
+    const depthM = Math.max(0, plannedDepthM + verticalDeviationM)
+
+    const referencePoint = pointAtDistance(routePoints, referenceDistanceM)
+
+    readings.push({
+      elapsedS: s,
+      distanceM: referenceDistanceM,
+      lat: position.lat,
+      lng: position.lng,
+      depthM,
+      speedMPerMin: Math.max(0.1, AVG_ROP_M_PER_MIN + pseudoNoise(s * 2.3) * 0.15),
+      headingDeg,
+      forceKn: Math.max(10, BASE_FORCE_KN + depthM * 1.5 + pseudoNoise(s * 3.1) * 8),
+      lateralDeviationM: haversineDistanceM(position, referencePoint),
       verticalDeviationM,
     })
   }

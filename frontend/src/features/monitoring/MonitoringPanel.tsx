@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { Box, Button, Stack, Typography } from '@mui/material'
+import { useMemo, useState } from 'react'
+import { Box, Button, Checkbox, FormControlLabel, Stack, Typography } from '@mui/material'
 import { PanelFrame } from '../../layout/PanelFrame'
 import { colors } from '../../theme/tokens'
 import { usePlanningStore } from '../../store/planningStore'
@@ -37,8 +37,12 @@ export function MonitoringPanel() {
     error,
     turnWarning,
     replanTriggerIndex,
+    steeringOffsetDeg,
+    steer,
     start,
   } = useDrillingSession(currentProjectId)
+
+  const [manualMode, setManualMode] = useState(false)
 
   const latest = readings.length > 0 ? readings[readings.length - 1] : null
 
@@ -87,9 +91,25 @@ export function MonitoringPanel() {
         </Typography>
 
         <Box>
-          <Button variant="contained" disabled={!hasResult || isRunning} onClick={() => void start()}>
+          <Button variant="contained" disabled={!hasResult || isRunning} onClick={() => void start(manualMode)}>
             {isRunning ? 'Testlauf läuft…' : 'Testlauf starten'}
           </Button>
+          <FormControlLabel
+            sx={{ ml: 1.5 }}
+            control={
+              <Checkbox
+                size="small"
+                checked={manualMode}
+                disabled={isRunning}
+                onChange={(_, checked) => setManualMode(checked)}
+              />
+            }
+            label={
+              <Typography variant="caption" color={colors.textSecondary}>
+                Manuelle Steuerung (Draufsicht anklicken, dann ←/→)
+              </Typography>
+            }
+          />
           {!hasResult && (
             <Typography variant="caption" color={colors.textMuted} sx={{ display: 'block', mt: 0.5 }}>
               Erst "Planung berechnen", um einen Testlauf zu starten.
@@ -122,6 +142,8 @@ export function MonitoringPanel() {
               readings={readings}
               replanTriggerIndex={replanTriggerIndex}
               guidance={guidance}
+              manualMode={manualMode}
+              onSteer={steer}
             />
             <SeitenansichtView profile={profile} readings={readings} replanTriggerIndex={replanTriggerIndex} guidance={guidance} />
 
@@ -133,6 +155,13 @@ export function MonitoringPanel() {
               />
               <Reading label="Vortriebsgeschwindigkeit" value={`${latest.speedMPerMin.toFixed(2)} m/min`} />
               <Reading label="Richtung" value={`${latest.headingDeg.toFixed(1)}°`} />
+              {manualMode && (
+                <Reading
+                  label="Lenkwinkel"
+                  value={`${steeringOffsetDeg >= 0 ? '+' : ''}${steeringOffsetDeg}°`}
+                  color={steeringOffsetDeg === 0 ? undefined : colors.accentOrange}
+                />
+              )}
               <Reading label="Vortriebskraft" value={`${latest.forceKn.toFixed(1)} kN`} />
               <Reading label="Tiefe" value={`${latest.depthM.toFixed(2)} m`} />
               <Reading

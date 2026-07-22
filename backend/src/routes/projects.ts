@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import type { Response } from 'express'
-import { generateDrillingSession, replanFromCurrentPosition } from '@hdd-planner/domain'
+import { generateDrillingSession, replanFromCurrentPosition, applyManualSteering } from '@hdd-planner/domain'
 import { requireAuth } from '../middleware/auth'
 import { isPlanningParameters, isResolvedPlanningParameters, isFeatureCollection } from '../validators'
 import { createProject, findProjectsByUserId, findOwnedProject, updateProjectParameters } from '../repositories/projectRepository'
@@ -209,7 +209,8 @@ projectsRouter.post('/:id/drilling-session/start', async (req, res, next) => {
       res.status(400).json({ error: 'Start- und Zielpunkt müssen gesetzt sein, bevor ein Testlauf gestartet werden kann' })
       return
     }
-    const readings = generateDrillingSession(project.parameters)
+    const manualMode = req.body?.manualMode === true
+    const readings = generateDrillingSession(project.parameters, { manualDrift: manualMode })
     const session = await createSession(project.id, DEFAULT_PLAYBACK_SPEED, readings)
     res.status(201).json({
       startedAt: session.startedAt,
@@ -287,6 +288,44 @@ projectsRouter.post('/:id/drilling-session/replan', async (req, res, next) => {
     await updateSessionReadings(session.id, splicedReadings)
 
     res.json({ newPlanPoints, turnWarning, triggerIndex: triggerElapsedS })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// "Manuelle Steuerung" Testlauf mode: the Bauleiter holds a course
+// correction via the keyboard (Draufsicht Pfeiltasten) instead of the
+// automatic drift model. Persists the steered tail into the session so it
+// survives a page reload/poll the same way a real correction would, and so
+// a later /replan trigger reads a currentReading that reflects the actual
+// steered position rather than the original (unsteered) precomputed one.
+projectsRouter.post('/:id/drilling-session/steer', async (req, res, next) => {
+  try {
+    const project = await requireOwnedProject(req.params.id, req.userId!, res)
+    if (!project) return
+    if (!isResolvedPlanningParameters(project.parameters)) {
+      res.status(400).json({ error: 'Start- und Zielpunkt müssen gesetzt sein' })
+      return
+    }
+    const session = await findLatestSession(project.id)
+    if (!session) {
+      res.status(404).json({ error: 'No drilling session found for this project' })
+      return
+    }
+
+    const atElapsedS = Number(req.body?.atElapsedS)
+    const steeringOffsetDeg = Number(req.body?.steeringOffsetDeg)
+    const currentReading = session.readings[atElapsedS]
+    if (!Number.isInteger(atElapsedS) || !currentReading || !Number.isFinite(steeringOffsetDeg)) {
+      res.status(400).json({ error: 'atElapsedS/steeringOffsetDeg invalid for this session' })
+      return
+    }
+
+    const newTail = applyManualSteering(currentReading, project.parameters, steeringOffsetDeg)
+    const splicedReadings = [...session.readings.slice(0, atElapsedS + 1), ...newTail]
+    await updateSessionReadings(session.id, splicedReadings)
+
+    res.status(204).end()
   } catch (err) {
     next(err)
   }
