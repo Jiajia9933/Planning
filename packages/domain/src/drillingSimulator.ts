@@ -15,6 +15,14 @@ export interface DrillingReading {
   forceKn: number
   lateralDeviationM: number
   verticalDeviationM: number
+  // Instantaneous pitch (vertical angle, degrees, positive = descending) —
+  // the vertical counterpart of headingDeg, needed for the same reason:
+  // applyManualSteering must be able to continue a *second* vertical kick
+  // from wherever the pitch actually currently is, not silently reset to
+  // the planned profile's local slope each time (that reset is what
+  // produced a near-vertical kink when a kick landed while a previous one
+  // was still mid-convergence). Always populated, mirroring headingDeg.
+  pitchDeg: number
   // Manual-steering mode only: has this axis ever been kicked away from
   // the plan (this call, or an earlier one)? Explicit and carried forward
   // reading-to-reading rather than inferred from lateral/verticalDeviationM,
@@ -112,6 +120,10 @@ export function generateDrillingSession(
     const headingDeg = bearingDeg(behindPoint, aheadPoint)
     const actualPoint = offsetPerpendicular(plannedPoint, headingDeg, lateralOffsetM)
 
+    const plannedDepthBehind = interpolateDepthAtDistance(profile, Math.max(0, distanceM - 1))
+    const plannedDepthAhead = interpolateDepthAtDistance(profile, Math.min(totalLengthM, distanceM + 1))
+    const pitchDeg = (Math.atan((plannedDepthAhead - plannedDepthBehind) / 2) * 180) / Math.PI
+
     readings.push({
       elapsedS: s,
       distanceM,
@@ -120,6 +132,7 @@ export function generateDrillingSession(
       depthM: Math.max(0, plannedDepthM + verticalDeviationM),
       speedMPerMin: Math.max(0.1, AVG_ROP_M_PER_MIN + pseudoNoise(s * 2.3) * 0.15),
       headingDeg,
+      pitchDeg,
       forceKn: Math.max(10, BASE_FORCE_KN + plannedDepthM * 1.5 + pseudoNoise(s * 3.1) * 8),
       lateralDeviationM: Math.abs(lateralOffsetM),
       verticalDeviationM,
@@ -179,13 +192,13 @@ export function applyManualSteering(
   let position: GeoPoint = { lat: currentReading.lat, lng: currentReading.lng }
   let depthM = currentReading.depthM
   let currentHeadingDeg = (currentReading.headingDeg + headingKickDeg + 360) % 360
-
-  let currentPitchRad = 0
-  if (verticalIsKicked) {
-    const currentDepthBehind = interpolateDepthAtDistance(profile, Math.max(0, currentReading.distanceM - 1))
-    const currentDepthAhead = interpolateDepthAtDistance(profile, Math.min(totalLengthM, currentReading.distanceM + 1))
-    currentPitchRad = Math.atan((currentDepthAhead - currentDepthBehind) / 2) + (verticalKickDeg * Math.PI) / 180
-  }
+  // Continues from the bit's actual current pitch (same pattern as
+  // currentHeadingDeg above) — NOT re-derived from the planned profile's
+  // local slope every time. Re-deriving from the plan was the bug: a
+  // second kick landing while an earlier one was still mid-convergence
+  // would discard that progress and jump to "planned slope + new kick",
+  // producing a near-vertical kink instead of continuing smoothly.
+  let currentPitchRad = (currentReading.pitchDeg * Math.PI) / 180 + (verticalKickDeg * Math.PI) / 180
 
   for (let s = currentReading.elapsedS + 1; s <= totalDurationS; s++) {
     const t = Math.min(1, s / totalDurationS)
@@ -214,7 +227,11 @@ export function applyManualSteering(
       depthM = Math.max(0, depthM + Math.tan(currentPitchRad) * stepM)
     }
     // else: depthM stays frozen at currentReading.depthM — no vertical
-    // motion at all until the vertical axis is itself kicked.
+    // motion at all until the vertical axis is itself kicked. The true
+    // instantaneous pitch during a freeze is exactly 0 (flat, not moving),
+    // not whatever it happened to be before the freeze — pushed as such
+    // below so a *later* vertical kick correctly kicks from level, not
+    // from a stale pre-freeze angle.
 
     const referencePoint = pointAtDistance(routePoints, referenceDistanceM)
     const plannedDepthHereM = interpolateDepthAtDistance(profile, referenceDistanceM)
@@ -227,6 +244,7 @@ export function applyManualSteering(
       depthM,
       speedMPerMin: Math.max(0.1, AVG_ROP_M_PER_MIN + pseudoNoise(s * 2.3) * 0.15),
       headingDeg: currentHeadingDeg,
+      pitchDeg: verticalIsKicked ? (currentPitchRad * 180) / Math.PI : 0,
       forceKn: Math.max(10, BASE_FORCE_KN + depthM * 1.5 + pseudoNoise(s * 3.1) * 8),
       lateralDeviationM: haversineDistanceM(position, referencePoint),
       verticalDeviationM: depthM - plannedDepthHereM,
@@ -259,6 +277,7 @@ function fitQuadraticDepthTaper(p0: number, s0: number, remainingLengthM: number
   const a = -(p0 + s0 * L) / (L * L)
   return {
     depthAt: (d: number) => p0 + s0 * d + a * d * d,
+    slopeAt: (d: number) => s0 + 2 * a * d,
     exitSlope: s0 + 2 * a * L,
   }
 }
@@ -294,7 +313,7 @@ export function replanFromCurrentPosition(
   const depthAhead = interpolateDepthAtDistance(profile, Math.min(originalTotalLengthM, currentReading.distanceM + 1))
   const currentSlope = (depthAhead - depthBehind) / 2
 
-  const { depthAt, exitSlope } = fitQuadraticDepthTaper(currentReading.depthM, currentSlope, remainingLengthM)
+  const { depthAt, slopeAt, exitSlope } = fitQuadraticDepthTaper(currentReading.depthM, currentSlope, remainingLengthM)
 
   const warnings: string[] = []
 
@@ -342,6 +361,7 @@ export function replanFromCurrentPosition(
       depthM,
       speedMPerMin: Math.max(0.1, AVG_ROP_M_PER_MIN + pseudoNoise(s * 2.3) * 0.15),
       headingDeg,
+      pitchDeg: (Math.atan(slopeAt(distanceAlongNewM)) * 180) / Math.PI,
       forceKn: Math.max(10, BASE_FORCE_KN + depthM * 1.5 + pseudoNoise(s * 3.1) * 8),
       // Small residual noise only — no drift envelope, so the corrected
       // segment doesn't itself drift enough to re-trigger a second replan.
