@@ -25,6 +25,8 @@ export interface PlanningParameters {
   minDrillRadiusM: number
   entryAngleDeg: number
   exitAngleDeg: number
+  /** No bend (horizontal or vertical) may deflect more sharply than this — a real drill pipe can't suddenly rotate through a near-reversal. */
+  maxDeflectionAngleDeg: number
   /** Minimum required clearance to existing utilities (§5.3 "Safety Distance"). */
   safetyDistanceM: number
 }

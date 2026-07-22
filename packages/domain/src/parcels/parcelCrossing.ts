@@ -1,11 +1,6 @@
-import { segmentIntersection } from '@hdd-planner/domain'
-import type { Coord } from '@hdd-planner/domain'
-import type { ParcelFeatureCollection } from './flurstuecke/shapefileImport'
-
-export interface CrossedParcel {
-  index: number
-  label: string
-}
+import { segmentIntersection } from '../lineIntersection'
+import type { Coord } from '../lineIntersection'
+import type { ParcelFeatureCollection, CrossedParcel } from './types'
 
 /** Ray-casting point-in-polygon test against a single ring. */
 export function pointInRing(point: Coord, ring: Coord[]): boolean {
@@ -47,8 +42,8 @@ function routeCrossesPolygon(routeCoords: Coord[], rings: Coord[][]): boolean {
  * Which uploaded parcels the drill route passes through — a parcel counts as
  * crossed if any route vertex falls inside it or any route segment crosses
  * one of its boundary edges. Every extra parcel crossed is another property
- * owner whose consent is needed, see project-utility-clash-requirement-style
- * reasoning: this is what lets a Bauleiter see the cost of a routing choice.
+ * owner whose consent is needed — this is what lets a Bauleiter see the cost
+ * of a routing choice.
  */
 export function findCrossedParcels(routeCoords: Coord[], parcels: ParcelFeatureCollection): CrossedParcel[] {
   const crossed: CrossedParcel[] = []

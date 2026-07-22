@@ -15,6 +15,7 @@ export const mockPlanningParameters: PlanningParameters = {
   minDrillRadiusM: 30,
   entryAngleDeg: 12,
   exitAngleDeg: 12,
+  maxDeflectionAngleDeg: 45,
   safetyDistanceM: 1.0,
 }
 

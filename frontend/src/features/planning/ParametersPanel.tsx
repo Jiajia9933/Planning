@@ -14,8 +14,7 @@ import GpsFixedOutlinedIcon from '@mui/icons-material/GpsFixedOutlined'
 import { colors, utilityColors } from '../../theme/tokens'
 import { usePlanningStore } from '../../store/planningStore'
 import { mockUtilityLayers } from '../../data/mockPlanning'
-import { isResolved } from '@hdd-planner/domain'
-import { optimizeRoute } from '../../domain/routeOptimizer'
+import { buildRoutePoints, isResolved, optimizeRoute, smoothSharpBends } from '@hdd-planner/domain'
 import type { DrillRig, PlanningParameters } from '../../types/hdd'
 
 const utilityLabels = Object.fromEntries(mockUtilityLayers.map((l) => [l.type, l.label]))
@@ -59,11 +58,15 @@ export function ParametersPanel() {
 
   const resolved = isResolved(parameters)
 
+  // Runs smoothing too, so this preview matches what an immediately-following
+  // "Planung berechnen" (which always smooths) would produce.
   const handleOptimizeRoute = () => {
     if (!parameters.startPoint || !parameters.endPoint) return
-    const result = optimizeRoute(parameters.startPoint, parameters.endPoint, uploadedParcels, parameters.minDrillRadiusM)
-    setWaypoints(result.waypoints)
-    setOptimizeInfo({ crossedParcelCount: result.crossedParcelCount, warnings: result.warnings })
+    const optimized = optimizeRoute(parameters.startPoint, parameters.endPoint, uploadedParcels)
+    const routePoints = buildRoutePoints(parameters.startPoint, parameters.endPoint, optimized.waypoints)
+    const smoothing = smoothSharpBends(routePoints, parameters.minDrillRadiusM, parameters.maxDeflectionAngleDeg)
+    setWaypoints(smoothing.points.slice(1, -1))
+    setOptimizeInfo({ crossedParcelCount: optimized.crossedParcelCount, warnings: [...optimized.warnings, ...smoothing.warnings] })
   }
   // `profile` empty covers both "points not set" and "set but not yet
   // calculated" — ERGEBNISSE/KOLLISIONSPRÜFUNG only ever show real,
@@ -149,6 +152,14 @@ export function ParametersPanel() {
             type="number"
             value={parameters.exitAngleDeg}
             onChange={(e) => update('exitAngleDeg', Number(e.target.value))}
+            slotProps={unitAdornment('°')}
+            fullWidth
+          />
+          <TextField
+            label="Ablenkwinkel (max.)"
+            type="number"
+            value={parameters.maxDeflectionAngleDeg}
+            onChange={(e) => update('maxDeflectionAngleDeg', Number(e.target.value))}
             slotProps={unitAdornment('°')}
             fullWidth
           />

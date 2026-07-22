@@ -30,6 +30,7 @@ export function isPlanningParameters(value: unknown): value is PlanningParameter
     typeof p.minDrillRadiusM === 'number' &&
     typeof p.entryAngleDeg === 'number' &&
     typeof p.exitAngleDeg === 'number' &&
+    typeof p.maxDeflectionAngleDeg === 'number' &&
     typeof p.safetyDistanceM === 'number'
   )
 }

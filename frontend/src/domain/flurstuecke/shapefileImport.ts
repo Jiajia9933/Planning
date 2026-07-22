@@ -1,10 +1,9 @@
 import shp from 'shpjs'
-import type { Feature, FeatureCollection, Geometry, MultiPolygon, Polygon } from 'geojson'
+import type { Feature, Geometry, MultiPolygon, Polygon } from 'geojson'
+import type { ParcelFeatureCollection } from '@hdd-planner/domain'
 
 /** DBF attribute keys, in priority order, that commonly identify a parcel. */
 const LABEL_ATTRIBUTE_CANDIDATES = ['FLSTNR', 'FLURSTNR', 'NUMMER', 'GEMARKUNG', 'EIGENTUEMER', 'OWNER', 'LABEL']
-
-export type ParcelFeatureCollection = FeatureCollection<Polygon | MultiPolygon, { label?: string }>
 
 function pickLabel(properties: Record<string, unknown>): string | undefined {
   for (const key of LABEL_ATTRIBUTE_CANDIDATES) {

@@ -9,10 +9,9 @@ import { parseShapefileZip } from '../../domain/spartenplan/shapefileImport'
 import { guessUtilityType, buildUploadedFeatureCollection } from '../../domain/spartenplan/normalize'
 import type { ImportedLayerInfo, LayerAssignment, SpartenplanImportResult } from '../../domain/spartenplan/types'
 import { parseParcelShapefileZip } from '../../domain/flurstuecke/shapefileImport'
-import type { ParcelFeatureCollection } from '../../domain/flurstuecke/shapefileImport'
 import { isValidWgs84, reprojectFeatures } from '../../domain/reproject'
 import { CrsPicker } from './CrsPicker'
-import type { UtilityType } from '../../types/hdd'
+import type { UtilityType, ParcelFeatureCollection } from '../../types/hdd'
 
 const utilityLabels = Object.fromEntries(mockUtilityLayers.map((l) => [l.type, l.label])) as Record<
   UtilityType,

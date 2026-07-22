@@ -9,6 +9,8 @@ export type {
   UtilityType,
   ProfileSample,
   UtilityCrossing,
+  ParcelFeatureCollection,
+  CrossedParcel,
 } from '@hdd-planner/domain'
 
 import type { UtilityType } from '@hdd-planner/domain'

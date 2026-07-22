@@ -5,7 +5,6 @@ import { buildRoutePoints, insertPointAtBestIndex, isResolved } from '@hdd-plann
 import { apiFetch, apiFetchBlob } from '../features/auth/api'
 import { buildReportPdf } from '../domain/reportPdf'
 import type { SpartenplanMeta } from '../domain/spartenplan/types'
-import type { ParcelFeatureCollection } from '../domain/flurstuecke/shapefileImport'
 import type { ParcelsMeta } from '../domain/flurstuecke/types'
 import type {
   GeoPoint,
@@ -14,6 +13,7 @@ import type {
   ProfileSample,
   UtilityCrossing,
   UtilityType,
+  ParcelFeatureCollection,
 } from '../types/hdd'
 
 export type PointKind = 'start' | 'end'
@@ -62,6 +62,7 @@ interface CalculatePayload {
   result: PlanningResult
   profile: ProfileSample[]
   conflicts: UtilityCrossing[]
+  effectiveWaypoints: GeoPoint[]
   terrainSource: 'real' | 'synthetic'
 }
 
@@ -313,16 +314,28 @@ export const usePlanningStore = create<PlanningState>((set, get) => ({
   // rethrown) since this also runs implicitly after bootstrap/upload changes
   // where there's no dedicated UI to catch a rejection; the "Planung
   // berechnen" button only cares that `isCalculating` flips back off.
+  // After every calculation, parameters.waypoints is overwritten with
+  // whatever was actually planned (parcel avoidance and/or sharp-bend
+  // smoothing insertions) — draggable waypoint markers on the map will
+  // visibly shift/multiply. This keeps the effective route consistent
+  // everywhere (map, 3D view, conflict detection, exported reports) instead
+  // of silently drifting from what was actually planned.
   calculate: async () => {
-    const { parameters, uploadedSpartenplan, terrainElevationsM } = get()
+    const { parameters, uploadedSpartenplan, uploadedParcels, terrainElevationsM } = get()
     if (!isResolved(parameters)) return
     set({ isCalculating: true })
     try {
       const data = await apiFetch<CalculatePayload>('/api/calculate', {
         method: 'POST',
-        body: { parameters, uploadedSpartenplan, terrainElevationsM },
+        body: { parameters, uploadedSpartenplan, uploadedParcels, terrainElevationsM },
       })
-      set({ result: data.result, profile: data.profile, conflicts: data.conflicts, terrainSource: data.terrainSource })
+      set((state) => ({
+        result: data.result,
+        profile: data.profile,
+        conflicts: data.conflicts,
+        terrainSource: data.terrainSource,
+        parameters: { ...state.parameters, waypoints: data.effectiveWaypoints },
+      }))
     } catch (err) {
       console.error('Berechnung fehlgeschlagen:', err)
     } finally {

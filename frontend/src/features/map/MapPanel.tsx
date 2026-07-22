@@ -30,10 +30,14 @@ import type { UtilityLayerState } from '../../types/hdd'
 import { usePlanningStore } from '../../store/planningStore'
 import { useMapLibreMap } from './useMapLibreMap'
 import type { BasemapId } from './mapStyles'
-import { buildDrillRouteFeature, buildParcelGridFeatureCollection, buildUtilityLinesFeatureCollection, defaultUtilityTypes } from '@hdd-planner/domain'
-import type { Coord } from '@hdd-planner/domain'
-import type { ParcelFeatureCollection } from '../../domain/flurstuecke/shapefileImport'
-import { findCrossedParcels } from '../../domain/parcelCrossing'
+import {
+  buildDrillRouteFeature,
+  buildParcelGridFeatureCollection,
+  buildUtilityLinesFeatureCollection,
+  defaultUtilityTypes,
+  findCrossedParcels,
+} from '@hdd-planner/domain'
+import type { Coord, ParcelFeatureCollection } from '@hdd-planner/domain'
 import { featureCollectionBounds } from '../../domain/geoBounds'
 import './maplibre-dark.css'
 
