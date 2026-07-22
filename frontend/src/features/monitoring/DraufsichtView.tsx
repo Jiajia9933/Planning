@@ -135,17 +135,19 @@ export function DraufsichtView({ startPoint, endPoint, waypoints, readings, repl
                     strokeWidth={2}
                     markerEnd="url(#arrow-actual)"
                   />
-                  <line
-                    x1={x}
-                    y1={y}
-                    x2={x + corrective.dx}
-                    y2={y + corrective.dy}
-                    stroke={colors.accentRed}
-                    strokeWidth={2}
-                    strokeDasharray={guidance.correctiveHeadingFeasible ? undefined : '4 3'}
-                    opacity={guidance.correctiveHeadingFeasible ? 1 : 0.55}
-                    markerEnd="url(#arrow-corrective)"
-                  />
+                  {guidance.showCorrectiveHeading && (
+                    <line
+                      x1={x}
+                      y1={y}
+                      x2={x + corrective.dx}
+                      y2={y + corrective.dy}
+                      stroke={colors.accentRed}
+                      strokeWidth={2}
+                      strokeDasharray={guidance.correctiveHeadingFeasible ? undefined : '4 3'}
+                      opacity={guidance.correctiveHeadingFeasible ? 1 : 0.55}
+                      markerEnd="url(#arrow-corrective)"
+                    />
+                  )}
                 </>
               )
             })()}

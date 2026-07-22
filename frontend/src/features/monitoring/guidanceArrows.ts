@@ -2,16 +2,19 @@ import { bearingDeg, haversineDistanceM, interpolateDepthAtDistance } from '@hdd
 import type { DrillingReading, GeoPoint, ProfileSample } from '@hdd-planner/domain'
 import { optimizeRoute } from '../../domain/routeOptimizer'
 import type { ParcelFeatureCollection } from '../../domain/flurstuecke/shapefileImport'
+import { TREND_MIN_ABSOLUTE_M } from './constants'
 
 export interface GuidanceArrows {
   actualHeadingDeg: number
   plannedHeadingDeg: number
   correctiveHeadingDeg: number
   correctiveHeadingFeasible: boolean
+  showCorrectiveHeading: boolean
   actualVerticalAngleDeg: number
   plannedVerticalAngleDeg: number
   correctiveVerticalAngleDeg: number
   correctiveVerticalFeasible: boolean
+  showCorrectiveVertical: boolean
   warningText: string | null
 }
 
@@ -98,12 +101,22 @@ export function computeGuidanceArrows(
   const correctiveVerticalAngleDeg = (Math.atan(-latest.depthM / remainingLengthM) * 180) / Math.PI
   const correctiveVerticalFeasible = Math.abs(correctiveVerticalAngleDeg) <= exitAngleDeg
 
+  // Ist and Geplant already coincide (within the simulator's own noise
+  // floor) — there's nothing to correct yet, so the corrective arrow would
+  // just be pointing at "straight to the target", which is misleading to
+  // show as a distinct "correction". Same floor the trend-based replan
+  // trigger uses, for the same reason (see useDrillingSession.ts).
+  const showCorrectiveHeading = Math.abs(latest.lateralDeviationM) >= TREND_MIN_ABSOLUTE_M
+  const showCorrectiveVertical = Math.abs(latest.verticalDeviationM) >= TREND_MIN_ABSOLUTE_M
+
   const warnings: string[] = []
-  if (!headingRadiusOk) {
-    warnings.push(`Kurskorrektur enger als der minimale Bohrradius (${minDrillRadiusM} m) zulässt.`)
+  if (showCorrectiveHeading) {
+    if (!headingRadiusOk) {
+      warnings.push(`Kurskorrektur enger als der minimale Bohrradius (${minDrillRadiusM} m) zulässt.`)
+    }
+    warnings.push(...optimized.warnings)
   }
-  warnings.push(...optimized.warnings)
-  if (!correctiveVerticalFeasible) {
+  if (showCorrectiveVertical && !correctiveVerticalFeasible) {
     warnings.push(
       `Erforderlicher Austrittswinkel (${Math.abs(correctiveVerticalAngleDeg).toFixed(1)}°) überschreitet das Limit (${exitAngleDeg}°).`,
     )
@@ -114,10 +127,12 @@ export function computeGuidanceArrows(
     plannedHeadingDeg,
     correctiveHeadingDeg,
     correctiveHeadingFeasible,
+    showCorrectiveHeading,
     actualVerticalAngleDeg,
     plannedVerticalAngleDeg,
     correctiveVerticalAngleDeg,
     correctiveVerticalFeasible,
+    showCorrectiveVertical,
     warningText: warnings.length > 0 ? warnings.join(' ') : null,
   }
 }

@@ -47,7 +47,8 @@ export function MonitoringPanel() {
   // triggered. See the guidanceArrows module for why this reacts earlier
   // than the discrete trigger-once auto-replan.
   const guidance = useMemo(() => {
-    if (!parameters.endPoint) return null
+    // Nothing left to steer toward once the run has reached the end.
+    if (!parameters.endPoint || isComplete) return null
     return computeGuidanceArrows(
       readings,
       parameters.endPoint,
@@ -56,7 +57,7 @@ export function MonitoringPanel() {
       parameters.minDrillRadiusM,
       parameters.exitAngleDeg,
     )
-  }, [readings, parameters.endPoint, profile, uploadedParcels, parameters.minDrillRadiusM, parameters.exitAngleDeg])
+  }, [readings, parameters.endPoint, profile, uploadedParcels, parameters.minDrillRadiusM, parameters.exitAngleDeg, isComplete])
 
   // Downsampled to keep the chart light even once a run has thousands of readings.
   const chartPoints = useMemo(() => {

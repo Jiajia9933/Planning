@@ -113,17 +113,19 @@ export function SeitenansichtView({ profile, readings, replanTriggerIndex, guida
                       strokeWidth={2}
                       markerEnd="url(#sa-arrow-actual)"
                     />
-                    <line
-                      x1={x}
-                      y1={y}
-                      x2={x + corrective.dx}
-                      y2={y + corrective.dy}
-                      stroke={colors.accentRed}
-                      strokeWidth={2}
-                      strokeDasharray={guidance.correctiveVerticalFeasible ? undefined : '4 3'}
-                      opacity={guidance.correctiveVerticalFeasible ? 1 : 0.55}
-                      markerEnd="url(#sa-arrow-corrective)"
-                    />
+                    {guidance.showCorrectiveVertical && (
+                      <line
+                        x1={x}
+                        y1={y}
+                        x2={x + corrective.dx}
+                        y2={y + corrective.dy}
+                        stroke={colors.accentRed}
+                        strokeWidth={2}
+                        strokeDasharray={guidance.correctiveVerticalFeasible ? undefined : '4 3'}
+                        opacity={guidance.correctiveVerticalFeasible ? 1 : 0.55}
+                        markerEnd="url(#sa-arrow-corrective)"
+                      />
+                    )}
                   </>
                 )
               })()}

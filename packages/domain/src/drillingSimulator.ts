@@ -70,8 +70,8 @@ export function generateDrillingSession(params: ResolvedPlanningParameters): Dri
     const plannedPoint = pointAtDistance(routePoints, distanceM)
     const plannedDepthM = interpolateDepthAtDistance(profile, distanceM)
 
-    const lateralOffsetM = driftEnvelope(t) * 2.5 + pseudoNoise(s) * 0.15
-    const verticalDeviationM = driftEnvelope(t) * 0.6 + pseudoNoise(s * 1.7) * 0.08
+    const lateralOffsetM = driftEnvelope(t) * 4.5 + pseudoNoise(s) * 0.15
+    const verticalDeviationM = driftEnvelope(t) * 1.8 + pseudoNoise(s * 1.7) * 0.08
 
     // A ~2m centered window along the *planned* route gives a numerically
     // stable heading — the per-second movement of the actual point itself
