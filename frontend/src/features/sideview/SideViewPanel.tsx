@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { Box, Stack, Typography } from '@mui/material'
+import { Box, Stack, Typography, ToggleButton, ToggleButtonGroup } from '@mui/material'
 import { PanelFrame } from '../../layout/PanelFrame'
 import { colors, utilityColors } from '../../theme/tokens'
 import { mockUtilityLayers } from '../../data/mockPlanning'
@@ -53,6 +53,8 @@ function buildSmoothPath(points: { x: number; y: number }[]): string {
   return d.join(' ')
 }
 
+type CurveStyle = 'sinus' | 'segmented'
+
 export function SideViewPanel() {
   const profile = usePlanningStore((s) => s.profile)
   const minRadiusM = usePlanningStore((s) => s.result.minRadiusM)
@@ -64,6 +66,7 @@ export function SideViewPanel() {
   const terrainSource = usePlanningStore((s) => s.terrainSource)
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const [hoveredConflict, setHoveredConflict] = useState<UtilityCrossing | null>(null)
+  const [curveStyle, setCurveStyle] = useState<CurveStyle>('sinus')
   const svgRef = useRef<SVGSVGElement | null>(null)
 
   // Every hook above stays unconditional (Rules of Hooks) — the empty-state
@@ -72,36 +75,52 @@ export function SideViewPanel() {
   // are set but "Planung berechnen" hasn't run yet.
   const hasProfile = profile.length > 0
 
+  // Purely a display choice — the underlying engineering result (entry/exit
+  // arc + level straight, computed server-side) is unaffected either way.
+  // 'sinus' redraws the same terrain/max-depth data as the older single
+  // sine-curve shape some users are more used to reading at a glance.
+  const displayProfile = useMemo(() => {
+    if (curveStyle !== 'sinus' || profile.length === 0) return profile
+    const maxDistanceM = profile[profile.length - 1].distanceM
+    const currentMaxDepthM = Math.max(...profile.map((p) => p.terrainHeightM - p.drillPathHeightM))
+    return profile.map((p) => {
+      const t = maxDistanceM === 0 ? 0 : p.distanceM / maxDistanceM
+      const depthM = Math.sin(t * Math.PI) * currentMaxDepthM
+      const minRadiusDepthM = Math.sin(t * Math.PI) * (currentMaxDepthM * 0.82)
+      return { ...p, drillPathHeightM: p.terrainHeightM - depthM, minRadiusHeightM: p.terrainHeightM - minRadiusDepthM }
+    })
+  }, [profile, curveStyle])
+
   const { maxDistance, minHeight, maxHeight } = useMemo(() => {
-    if (profile.length === 0) return { maxDistance: 0, minHeight: 0, maxHeight: 0 }
-    const distances = profile.map((p) => p.distanceM)
-    const heights = profile.flatMap((p) => [p.terrainHeightM, p.drillPathHeightM, p.minRadiusHeightM])
+    if (displayProfile.length === 0) return { maxDistance: 0, minHeight: 0, maxHeight: 0 }
+    const distances = displayProfile.map((p) => p.distanceM)
+    const heights = displayProfile.flatMap((p) => [p.terrainHeightM, p.drillPathHeightM, p.minRadiusHeightM])
     return {
       maxDistance: Math.max(...distances),
       minHeight: Math.min(...heights) - 2,
       maxHeight: Math.max(...heights) + 2,
     }
-  }, [profile])
+  }, [displayProfile])
 
   const xScale = (d: number) => (d / maxDistance) * PLOT_W
   const yScale = (h: number) => PLOT_H - ((h - minHeight) / (maxHeight - minHeight)) * PLOT_H
 
   const terrainHeightAt = (distanceM: number) => {
-    if (profile.length === 0) return 0
-    for (let i = 0; i < profile.length - 1; i++) {
-      const a = profile[i]
-      const b = profile[i + 1]
+    if (displayProfile.length === 0) return 0
+    for (let i = 0; i < displayProfile.length - 1; i++) {
+      const a = displayProfile[i]
+      const b = displayProfile[i + 1]
       if (distanceM >= a.distanceM && distanceM <= b.distanceM) {
         const span = b.distanceM - a.distanceM
         const t = span === 0 ? 0 : (distanceM - a.distanceM) / span
         return a.terrainHeightM + (b.terrainHeightM - a.terrainHeightM) * t
       }
     }
-    return profile[profile.length - 1].terrainHeightM
+    return displayProfile[displayProfile.length - 1].terrainHeightM
   }
 
   const buildCurve = (key: 'terrainHeightM' | 'drillPathHeightM' | 'minRadiusHeightM') =>
-    buildSmoothPath(profile.map((p) => ({ x: xScale(p.distanceM), y: yScale(p[key]) })))
+    buildSmoothPath(displayProfile.map((p) => ({ x: xScale(p.distanceM), y: yScale(p[key]) })))
 
   const conflictScreenPoints = useMemo(
     () =>
@@ -134,7 +153,7 @@ export function SideViewPanel() {
     const distance = (relX / PLOT_W) * maxDistance
     let closest = 0
     let closestDelta = Infinity
-    profile.forEach((p, i) => {
+    displayProfile.forEach((p, i) => {
       const delta = Math.abs(p.distanceM - distance)
       if (delta < closestDelta) {
         closestDelta = delta
@@ -144,7 +163,7 @@ export function SideViewPanel() {
     setHoverIndex(closest)
   }
 
-  const hovered = hoverIndex !== null ? profile[hoverIndex] : null
+  const hovered = hoverIndex !== null ? displayProfile[hoverIndex] : null
   const yTicks = niceTicks(minHeight, maxHeight)
   const xTicks = niceTicks(0, maxDistance)
 
@@ -167,7 +186,15 @@ export function SideViewPanel() {
   }
 
   return (
-    <PanelFrame title="Seitenansicht (Längsschnitt)" actions={<SideViewLegend terrainSource={terrainSource} />}>
+    <PanelFrame
+      title="Seitenansicht (Längsschnitt)"
+      actions={
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+          <CurveStyleToggle value={curveStyle} onChange={setCurveStyle} />
+          <SideViewLegend terrainSource={terrainSource} />
+        </Stack>
+      }
+    >
       <Box sx={{ position: 'relative', width: '100%', height: '100%' }}>
         <svg
           ref={svgRef}
@@ -195,19 +222,19 @@ export function SideViewPanel() {
             <path d={buildCurve('terrainHeightM')} fill="none" stroke="#e2603f" strokeWidth={1.5} />
             <path d={buildCurve('drillPathHeightM')} fill="none" stroke={colors.accentOrange} strokeWidth={3} strokeLinecap="round" />
 
-            {profile.length > 0 && (
+            {displayProfile.length > 0 && (
               <>
                 <text
-                  x={xScale(profile[0].distanceM) + 6}
-                  y={yScale(profile[0].drillPathHeightM) - 8}
+                  x={xScale(displayProfile[0].distanceM) + 6}
+                  y={yScale(displayProfile[0].drillPathHeightM) - 8}
                   fill={colors.textSecondary}
                   fontSize={10}
                 >
                   Eintritt {entryAngleDeg}°
                 </text>
                 <text
-                  x={xScale(profile[profile.length - 1].distanceM) - 6}
-                  y={yScale(profile[profile.length - 1].drillPathHeightM) - 8}
+                  x={xScale(displayProfile[displayProfile.length - 1].distanceM) - 6}
+                  y={yScale(displayProfile[displayProfile.length - 1].drillPathHeightM) - 8}
                   fill={colors.textSecondary}
                   fontSize={10}
                   textAnchor="end"
@@ -335,6 +362,24 @@ export function SideViewPanel() {
         )}
       </Box>
     </PanelFrame>
+  )
+}
+
+function CurveStyleToggle({ value, onChange }: { value: CurveStyle; onChange: (value: CurveStyle) => void }) {
+  return (
+    <ToggleButtonGroup
+      size="small"
+      exclusive
+      value={value}
+      onChange={(_, next: CurveStyle | null) => next && onChange(next)}
+    >
+      <ToggleButton value="sinus" sx={{ px: 1, py: 0.25, fontSize: 11, color: colors.textSecondary }}>
+        Sinus
+      </ToggleButton>
+      <ToggleButton value="segmented" sx={{ px: 1, py: 0.25, fontSize: 11, color: colors.textSecondary }}>
+        3-Segment
+      </ToggleButton>
+    </ToggleButtonGroup>
   )
 }
 
