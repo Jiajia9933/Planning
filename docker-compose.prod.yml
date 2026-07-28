@@ -25,6 +25,12 @@ services:
       postgres:
         condition: service_healthy
 
+  route-optimizer:
+    build:
+      context: .
+      dockerfile: Dockerfile.route-optimizer
+    restart: unless-stopped
+
   backend:
     build:
       context: .
@@ -40,11 +46,16 @@ services:
       APP_BASE_URL: ${PUBLIC_ORIGIN}
       RESEND_API_KEY: ${RESEND_API_KEY}
       EMAIL_FROM: ${EMAIL_FROM}
+      # Not yet consumed by backend code — wired ahead of the actual
+      # routeOptimizerClient.ts integration (see project memory).
+      ROUTE_OPTIMIZER_URL: http://route-optimizer:8000
     depends_on:
       postgres:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      route-optimizer:
+        condition: service_started
     restart: unless-stopped
 
   frontend:
