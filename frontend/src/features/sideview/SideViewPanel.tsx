@@ -4,6 +4,8 @@ import { PanelFrame } from '../../layout/PanelFrame'
 import { colors, utilityColors } from '../../theme/tokens'
 import { mockUtilityLayers } from '../../data/mockPlanning'
 import { usePlanningStore } from '../../store/planningStore'
+import { applyCurveStyle } from '../../domain/profileCurveStyle'
+import type { CurveStyle } from '../../domain/profileCurveStyle'
 import type { UtilityCrossing } from '../../types/hdd'
 
 const WIDTH = 640
@@ -53,8 +55,6 @@ function buildSmoothPath(points: { x: number; y: number }[]): string {
   return d.join(' ')
 }
 
-type CurveStyle = 'sinus' | 'segmented'
-
 export function SideViewPanel() {
   const profile = usePlanningStore((s) => s.profile)
   const minRadiusM = usePlanningStore((s) => s.result.minRadiusM)
@@ -64,9 +64,10 @@ export function SideViewPanel() {
   const startPoint = usePlanningStore((s) => s.parameters.startPoint)
   const endPoint = usePlanningStore((s) => s.parameters.endPoint)
   const terrainSource = usePlanningStore((s) => s.terrainSource)
+  const curveStyle = usePlanningStore((s) => s.curveStyle)
+  const setCurveStyle = usePlanningStore((s) => s.setCurveStyle)
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const [hoveredConflict, setHoveredConflict] = useState<UtilityCrossing | null>(null)
-  const [curveStyle, setCurveStyle] = useState<CurveStyle>('sinus')
   const svgRef = useRef<SVGSVGElement | null>(null)
 
   // Every hook above stays unconditional (Rules of Hooks) — the empty-state
@@ -75,21 +76,9 @@ export function SideViewPanel() {
   // are set but "Planung berechnen" hasn't run yet.
   const hasProfile = profile.length > 0
 
-  // Purely a display choice — the underlying engineering result (entry/exit
-  // arc + level straight, computed server-side) is unaffected either way.
-  // 'sinus' redraws the same terrain/max-depth data as the older single
-  // sine-curve shape some users are more used to reading at a glance.
-  const displayProfile = useMemo(() => {
-    if (curveStyle !== 'sinus' || profile.length === 0) return profile
-    const maxDistanceM = profile[profile.length - 1].distanceM
-    const currentMaxDepthM = Math.max(...profile.map((p) => p.terrainHeightM - p.drillPathHeightM))
-    return profile.map((p) => {
-      const t = maxDistanceM === 0 ? 0 : p.distanceM / maxDistanceM
-      const depthM = Math.sin(t * Math.PI) * currentMaxDepthM
-      const minRadiusDepthM = Math.sin(t * Math.PI) * (currentMaxDepthM * 0.82)
-      return { ...p, drillPathHeightM: p.terrainHeightM - depthM, minRadiusHeightM: p.terrainHeightM - minRadiusDepthM }
-    })
-  }, [profile, curveStyle])
+  // curveStyle lives in the store (not local state) so the 3D view's tube
+  // redraws with the same choice — see Viewer3DPanel.tsx.
+  const displayProfile = useMemo(() => applyCurveStyle(profile, curveStyle), [profile, curveStyle])
 
   const { maxDistance, minHeight, maxHeight } = useMemo(() => {
     if (displayProfile.length === 0) return { maxDistance: 0, minHeight: 0, maxHeight: 0 }

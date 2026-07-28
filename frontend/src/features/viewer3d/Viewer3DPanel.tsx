@@ -16,6 +16,7 @@ import { rebuildSceneEntities } from './sceneEntities'
 import { computeCameraTarget, boundingSphereFromBounds } from './cameraFraming'
 import { buildUtilityLinesFeatureCollection, defaultUtilityTypes, sampleRoutePoints } from '@hdd-planner/domain'
 import { featureCollectionBounds } from '../../domain/geoBounds'
+import { applyCurveStyle } from '../../domain/profileCurveStyle'
 import { applyCutaway, removeCutaway } from './undergroundCutaway'
 import type { CutawayHandle } from './undergroundCutaway'
 import './cesium-dark.css'
@@ -40,6 +41,7 @@ export function Viewer3DPanel() {
   const endPoint = usePlanningStore((s) => s.parameters.endPoint)
   const waypoints = usePlanningStore((s) => s.parameters.waypoints)
   const profile = usePlanningStore((s) => s.profile)
+  const curveStyle = usePlanningStore((s) => s.curveStyle)
   const conflicts = usePlanningStore((s) => s.conflicts)
   const maxDepthM = usePlanningStore((s) => s.result.maxDepthM)
   const uploadedSpartenplan = usePlanningStore((s) => s.uploadedSpartenplan)
@@ -72,6 +74,11 @@ export function Viewer3DPanel() {
   useEffect(() => {
     setTerrainElevations(terrainElevationsM)
   }, [terrainElevationsM, setTerrainElevations])
+
+  // Same display-only choice as Seitenansicht (see profileCurveStyle.ts) —
+  // reading it from the store instead of local state is what makes toggling
+  // one view redraw the other too.
+  const displayProfile = useMemo(() => applyCurveStyle(profile, curveStyle), [profile, curveStyle])
 
   // The very first "Berechnen" (via bootstrap/createProject) almost always
   // runs before Cesium's World Terrain has finished loading, so it computes
@@ -126,7 +133,7 @@ export function Viewer3DPanel() {
   useEffect(() => {
     if (!viewer) return
     if (startPoint && endPoint) {
-      rebuildSceneEntities(viewer, startPoint, endPoint, waypoints, profile, conflicts, groundHeightM, utilities, terrainElevationsM)
+      rebuildSceneEntities(viewer, startPoint, endPoint, waypoints, displayProfile, conflicts, groundHeightM, utilities, terrainElevationsM)
     } else {
       viewer.entities.removeAll()
       viewer.scene.requestRender()
@@ -136,7 +143,7 @@ export function Viewer3DPanel() {
       flyToInitialView()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer, startPoint, endPoint, waypoints, profile, conflicts, groundHeightM, utilities, terrainElevationsM])
+  }, [viewer, startPoint, endPoint, waypoints, displayProfile, conflicts, groundHeightM, utilities, terrainElevationsM])
 
   useEffect(() => {
     if (!viewer) return

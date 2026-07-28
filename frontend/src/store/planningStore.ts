@@ -6,6 +6,7 @@ import { apiFetch, apiFetchBlob } from '../features/auth/api'
 import { buildReportPdf } from '../domain/reportPdf'
 import type { SpartenplanMeta } from '../domain/spartenplan/types'
 import type { ParcelsMeta } from '../domain/flurstuecke/types'
+import type { CurveStyle } from '../domain/profileCurveStyle'
 import type {
   GeoPoint,
   PlanningParameters,
@@ -101,6 +102,8 @@ interface PlanningState {
   terrainElevationsM: number[] | null
   terrainSource: 'real' | 'synthetic'
   reports: ReportSummary[]
+  /** Display-only choice for how the depth profile is drawn — shared by Seitenansicht and the 3D view so switching one switches both. Does not affect the underlying planning result. */
+  curveStyle: CurveStyle
 
   bootstrap: () => Promise<void>
   openProject: (id: string) => Promise<void>
@@ -119,6 +122,7 @@ interface PlanningState {
   setUploadedParcels: (fc: ParcelFeatureCollection, meta: ParcelsMeta) => Promise<void>
   clearUploadedParcels: () => Promise<void>
   setTerrainElevations: (elevationsM: number[] | null) => void
+  setCurveStyle: (style: CurveStyle) => void
   calculate: () => Promise<void>
   createReport: () => Promise<void>
   loadReports: () => Promise<void>
@@ -146,6 +150,7 @@ export const usePlanningStore = create<PlanningState>((set, get) => ({
   terrainElevationsM: null,
   terrainSource: 'synthetic',
   reports: [],
+  curveStyle: 'sinus',
 
   // Fetches the user's project list, then decides whether to open one
   // automatically (see LAST_PROJECT_ID_KEY / single-project cases) or leave
@@ -309,6 +314,8 @@ export const usePlanningStore = create<PlanningState>((set, get) => ({
   },
 
   setTerrainElevations: (elevationsM) => set({ terrainElevationsM: elevationsM }),
+
+  setCurveStyle: (style) => set({ curveStyle: style }),
 
   // Recompute is server-side now — errors are swallowed here (logged, not
   // rethrown) since this also runs implicitly after bootstrap/upload changes
