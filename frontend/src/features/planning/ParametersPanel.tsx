@@ -14,7 +14,7 @@ import GpsFixedOutlinedIcon from '@mui/icons-material/GpsFixedOutlined'
 import { colors, utilityColors } from '../../theme/tokens'
 import { usePlanningStore } from '../../store/planningStore'
 import { mockUtilityLayers } from '../../data/mockPlanning'
-import { buildRoutePoints, isResolved, optimizeRoute, smoothSharpBends } from '@hdd-planner/domain'
+import { isResolved } from '@hdd-planner/domain'
 import type { DrillRig, PlanningParameters } from '../../types/hdd'
 
 const utilityLabels = Object.fromEntries(mockUtilityLayers.map((l) => [l.type, l.label]))
@@ -44,13 +44,14 @@ export function ParametersPanel() {
   const conflicts = usePlanningStore((s) => s.conflicts)
   const isCalculating = usePlanningStore((s) => s.isCalculating)
   const pointPickMode = usePlanningStore((s) => s.pointPickMode)
-  const uploadedParcels = usePlanningStore((s) => s.uploadedParcels)
   const setParameter = usePlanningStore((s) => s.setParameter)
   const setPointPickMode = usePlanningStore((s) => s.setPointPickMode)
-  const setWaypoints = usePlanningStore((s) => s.setWaypoints)
   const calculate = usePlanningStore((s) => s.calculate)
+  const optimizeRoute = usePlanningStore((s) => s.optimizeRoute)
 
   const [optimizeInfo, setOptimizeInfo] = useState<{ crossedParcelCount: number; warnings: string[] } | null>(null)
+  const [optimizeError, setOptimizeError] = useState<string | null>(null)
+  const [isOptimizing, setIsOptimizing] = useState(false)
 
   const update = <K extends keyof PlanningParameters>(key: K, value: PlanningParameters[K]) => {
     setParameter(key, value)
@@ -58,15 +59,18 @@ export function ParametersPanel() {
 
   const resolved = isResolved(parameters)
 
-  // Runs smoothing too, so this preview matches what an immediately-following
-  // "Planung berechnen" (which always smooths) would produce.
-  const handleOptimizeRoute = () => {
-    if (!parameters.startPoint || !parameters.endPoint) return
-    const optimized = optimizeRoute(parameters.startPoint, parameters.endPoint, uploadedParcels)
-    const routePoints = buildRoutePoints(parameters.startPoint, parameters.endPoint, optimized.waypoints)
-    const smoothing = smoothSharpBends(routePoints, parameters.minDrillRadiusM, parameters.maxDeflectionAngleDeg)
-    setWaypoints(smoothing.points.slice(1, -1))
-    setOptimizeInfo({ crossedParcelCount: optimized.crossedParcelCount, warnings: [...optimized.warnings, ...smoothing.warnings] })
+  const handleOptimizeRoute = async () => {
+    setOptimizeError(null)
+    setIsOptimizing(true)
+    try {
+      const info = await optimizeRoute()
+      if (info) setOptimizeInfo(info)
+    } catch (err) {
+      console.error('Routenoptimierung fehlgeschlagen:', err)
+      setOptimizeError('Optimierungsservice nicht erreichbar — Route bitte manuell anpassen.')
+    } finally {
+      setIsOptimizing(false)
+    }
   }
   // `profile` empty covers both "points not set" and "set but not yet
   // calculated" — ERGEBNISSE/KOLLISIONSPRÜFUNG only ever show real,
@@ -175,11 +179,17 @@ export function ParametersPanel() {
           <Button
             variant="outlined"
             fullWidth
+            loading={isOptimizing}
             disabled={!resolved}
-            onClick={handleOptimizeRoute}
+            onClick={() => void handleOptimizeRoute()}
           >
             Route optimieren
           </Button>
+          {optimizeError && (
+            <Typography variant="caption" color={colors.accentRed}>
+              ⚠ {optimizeError}
+            </Typography>
+          )}
           {optimizeInfo && (
             <Stack spacing={0.5}>
               <Typography variant="caption" color={colors.textSecondary}>

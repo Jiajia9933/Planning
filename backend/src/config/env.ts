@@ -13,4 +13,5 @@ export const env = {
   resendApiKey: process.env.RESEND_API_KEY ?? '',
   emailFrom: process.env.EMAIL_FROM ?? 'onboarding@resend.dev',
   appBaseUrl: process.env.APP_BASE_URL ?? 'http://localhost:5173',
+  routeOptimizerUrl: process.env.ROUTE_OPTIMIZER_URL ?? 'http://localhost:8001',
 }

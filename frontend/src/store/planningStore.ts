@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { FeatureCollection, LineString } from 'geojson'
 import { mockPlanningParameters } from '../data/mockPlanning'
-import { buildRoutePoints, insertPointAtBestIndex, isResolved } from '@hdd-planner/domain'
+import { buildRoutePoints, insertPointAtBestIndex, isResolved, smoothSharpBends } from '@hdd-planner/domain'
 import { apiFetch, apiFetchBlob } from '../features/auth/api'
 import { buildReportPdf } from '../domain/reportPdf'
 import type { SpartenplanMeta } from '../domain/spartenplan/types'
@@ -123,6 +123,8 @@ interface PlanningState {
   clearUploadedParcels: () => Promise<void>
   setTerrainElevations: (elevationsM: number[] | null) => void
   setCurveStyle: (style: CurveStyle) => void
+  /** Calls the backend's /optimize-route proxy (Python route-optimizer service) rather than running avoidance in-browser — returns null if start/end aren't both set yet. */
+  optimizeRoute: () => Promise<{ crossedParcelCount: number; warnings: string[] } | null>
   calculate: () => Promise<void>
   createReport: () => Promise<void>
   loadReports: () => Promise<void>
@@ -316,6 +318,23 @@ export const usePlanningStore = create<PlanningState>((set, get) => ({
   setTerrainElevations: (elevationsM) => set({ terrainElevationsM: elevationsM }),
 
   setCurveStyle: (style) => set({ curveStyle: style }),
+
+  // Runs smoothing too (same as calculate() always does), so this preview
+  // matches what an immediately-following "Planung berechnen" would
+  // produce. Throws on service failure rather than falling back to a local
+  // implementation — the caller (ParametersPanel) shows an error instead.
+  optimizeRoute: async () => {
+    const { parameters, uploadedParcels } = get()
+    if (!parameters.startPoint || !parameters.endPoint) return null
+    const optimized = await apiFetch<{ waypoints: GeoPoint[]; crossedParcelCount: number; warnings: string[] }>(
+      '/api/calculate/optimize-route',
+      { method: 'POST', body: { start: parameters.startPoint, end: parameters.endPoint, uploadedParcels } },
+    )
+    const routePoints = buildRoutePoints(parameters.startPoint, parameters.endPoint, optimized.waypoints)
+    const smoothing = smoothSharpBends(routePoints, parameters.minDrillRadiusM, parameters.maxDeflectionAngleDeg)
+    get().setWaypoints(smoothing.points.slice(1, -1))
+    return { crossedParcelCount: optimized.crossedParcelCount, warnings: [...optimized.warnings, ...smoothing.warnings] }
+  },
 
   // Recompute is server-side now — errors are swallowed here (logged, not
   // rethrown) since this also runs implicitly after bootstrap/upload changes

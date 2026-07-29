@@ -3,7 +3,8 @@ import { computePlanning, detectUtilityConflicts, PROFILE_STEPS } from '@hdd-pla
 import type { FeatureCollection, LineString } from 'geojson'
 import type { UtilityType, ParcelFeatureCollection } from '@hdd-planner/domain'
 import { requireAuth } from '../middleware/auth'
-import { isPlanningParameters, isResolvedPlanningParameters, isFeatureCollection } from '../validators'
+import { isPlanningParameters, isResolvedPlanningParameters, isFeatureCollection, isGeoPoint } from '../validators'
+import { optimizeRouteRemote } from '../services/routeOptimizerClient'
 
 type SpartenplanFeatureCollection = FeatureCollection<LineString, { type: UtilityType }>
 
@@ -14,7 +15,7 @@ calculateRouter.use(requireAuth)
 // straight from the request body rather than re-reading the project, so the
 // frontend can call this with not-yet-saved edits (e.g. before pressing
 // "Speichern").
-calculateRouter.post('/', (req, res, next) => {
+calculateRouter.post('/', async (req, res, next) => {
   try {
     const {
       parameters,
@@ -55,13 +56,41 @@ calculateRouter.post('/', (req, res, next) => {
     const spartenplan = (uploadedSpartenplan ?? null) as SpartenplanFeatureCollection | null
     const uploadedParcels = (rawUploadedParcels ?? null) as ParcelFeatureCollection | null
 
-    const { result, profile, effectiveWaypoints } = computePlanning(parameters, { terrainElevationsM, uploadedParcels })
+    const { result, profile, effectiveWaypoints } = await computePlanning(parameters, {
+      terrainElevationsM,
+      uploadedParcels,
+      optimizeRoute: optimizeRouteRemote,
+    })
     // Conflict detection must run against the route computePlanning actually
     // planned (post avoidance/smoothing), not the raw request route, or it'd
     // silently check crossings against a route that's no longer being drawn.
     const effectiveParameters = { ...parameters, waypoints: effectiveWaypoints }
     const conflicts = detectUtilityConflicts(effectiveParameters, profile, spartenplan)
     res.json({ result, profile, conflicts, effectiveWaypoints, terrainSource: terrainElevationsM ? 'real' : 'synthetic' })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// Separate from the main /calculate flow — triggered by the "Route
+// optimieren" preview button, not "Planung berechnen". Proxies to the
+// Python route-optimizer service rather than running it in-process, since
+// the frontend used to import optimizeRoute from @hdd-planner/domain
+// directly for this and now can't (see services/route-optimizer).
+calculateRouter.post('/optimize-route', async (req, res, next) => {
+  try {
+    const { start, end, uploadedParcels: rawUploadedParcels } = req.body ?? {}
+    if (!isGeoPoint(start) || !isGeoPoint(end)) {
+      res.status(400).json({ error: 'start and end must both be GeoPoints' })
+      return
+    }
+    if (rawUploadedParcels != null && !isFeatureCollection(rawUploadedParcels)) {
+      res.status(400).json({ error: 'uploadedParcels must be a FeatureCollection or null' })
+      return
+    }
+    const uploadedParcels = (rawUploadedParcels ?? null) as ParcelFeatureCollection | null
+    const result = await optimizeRouteRemote(start, end, uploadedParcels)
+    res.json(result)
   } catch (err) {
     next(err)
   }

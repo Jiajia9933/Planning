@@ -3,7 +3,8 @@ import type { Coord } from './lineIntersection'
 import type { GeoPoint, ResolvedPlanningParameters, PlanningResult, ProfileSample } from './types'
 import type { ParcelFeatureCollection } from './parcels/types'
 import { findCrossedParcels } from './parcels/parcelCrossing'
-import { optimizeRoute } from './parcels/routeOptimizer'
+import { optimizeRoute as defaultOptimizeRoute } from './parcels/routeOptimizer'
+import type { RouteOptimizationResult } from './parcels/routeOptimizer'
 import { smoothSharpBends } from './bendSmoothing'
 
 const toRad = (deg: number) => (deg * Math.PI) / 180
@@ -17,6 +18,16 @@ export interface ComputePlanningOptions {
   // back to the synthetic placeholder terrain below.
   terrainElevationsM?: number[]
   uploadedParcels?: ParcelFeatureCollection | null
+  // Injectable seam for the parcel-avoidance step — defaults to the local
+  // TS implementation (routeOptimizer.ts) so any caller that doesn't pass
+  // one keeps working unchanged. The backend passes routeOptimizerClient's
+  // optimizeRouteRemote here instead, to call the Python route-optimizer
+  // service (see services/route-optimizer) rather than run it in-process.
+  optimizeRoute?: (
+    start: GeoPoint,
+    end: GeoPoint,
+    parcels: ParcelFeatureCollection,
+  ) => RouteOptimizationResult | Promise<RouteOptimizationResult>
 }
 
 // ============================================================
@@ -31,17 +42,17 @@ export interface ComputePlanningOptions {
 // profile, effectiveWaypoints} out — every caller (frontend UI, /api/calculate
 // route) depends on it unchanged. Searchable marker: ENGINEERING-TODO
 // ============================================================
-export function computePlanning(
+export async function computePlanning(
   params: ResolvedPlanningParameters,
   options: ComputePlanningOptions = {},
-): {
+): Promise<{
   result: PlanningResult
   profile: ProfileSample[]
   effectiveWaypoints: GeoPoint[]
-} {
+}> {
   const { startPoint, endPoint, waypoints, minDrillRadiusM, entryAngleDeg, exitAngleDeg, pipeDiameterMm, maxDeflectionAngleDeg } =
     params
-  const { terrainElevationsM, uploadedParcels } = options
+  const { terrainElevationsM, uploadedParcels, optimizeRoute = defaultOptimizeRoute } = options
 
   let routePoints = buildRoutePoints(startPoint, endPoint, waypoints)
 
@@ -53,7 +64,7 @@ export function computePlanning(
     const currentCoords: Coord[] = routePoints.map((p) => [p.lng, p.lat])
     const currentlyCrossed = findCrossedParcels(currentCoords, uploadedParcels)
     if (currentlyCrossed.length > 0) {
-      const optimized = optimizeRoute(startPoint, endPoint, uploadedParcels)
+      const optimized = await optimizeRoute(startPoint, endPoint, uploadedParcels)
       routePoints = buildRoutePoints(startPoint, endPoint, optimized.waypoints)
     }
   }
