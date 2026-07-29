@@ -7,6 +7,7 @@ import { buildReportPdf } from '../domain/reportPdf'
 import type { SpartenplanMeta } from '../domain/spartenplan/types'
 import type { ParcelsMeta } from '../domain/flurstuecke/types'
 import type { CurveStyle } from '../domain/profileCurveStyle'
+import { mergeParcelCollections } from '../domain/flurstuecke/mergeParcels'
 import type {
   GeoPoint,
   PlanningParameters,
@@ -98,6 +99,8 @@ interface PlanningState {
   spartenplanMeta: SpartenplanMeta | null
   uploadedParcels: ParcelFeatureCollection | null
   parcelsMeta: ParcelsMeta | null
+  /** Live Baden-Württemberg building footprints (Gebäude) from LGL-BW, kept fresh by MapPanel as the route changes — merged with uploadedParcels for avoidance/crossing purposes (see mergeParcelCollections). Null until the first fetch resolves, or if the service is unreachable. */
+  externalGebaeude: ParcelFeatureCollection | null
   /** Real per-route-point terrain elevation, pushed in by Viewer3DPanel's Cesium terrain sampling. Null until sampled (or when no Ion terrain is available) — calculate() falls back to the synthetic profile shape in that case. */
   terrainElevationsM: number[] | null
   terrainSource: 'real' | 'synthetic'
@@ -121,6 +124,7 @@ interface PlanningState {
   clearUploadedSpartenplan: () => Promise<void>
   setUploadedParcels: (fc: ParcelFeatureCollection, meta: ParcelsMeta) => Promise<void>
   clearUploadedParcels: () => Promise<void>
+  setExternalGebaeude: (fc: ParcelFeatureCollection | null) => void
   setTerrainElevations: (elevationsM: number[] | null) => void
   setCurveStyle: (style: CurveStyle) => void
   /** Calls the backend's /optimize-route proxy (Python route-optimizer service) rather than running avoidance in-browser — returns null if start/end aren't both set yet. */
@@ -149,6 +153,7 @@ export const usePlanningStore = create<PlanningState>((set, get) => ({
   spartenplanMeta: null,
   uploadedParcels: null,
   parcelsMeta: null,
+  externalGebaeude: null,
   terrainElevationsM: null,
   terrainSource: 'synthetic',
   reports: [],
@@ -319,16 +324,19 @@ export const usePlanningStore = create<PlanningState>((set, get) => ({
 
   setCurveStyle: (style) => set({ curveStyle: style }),
 
+  setExternalGebaeude: (fc) => set({ externalGebaeude: fc }),
+
   // Runs smoothing too (same as calculate() always does), so this preview
   // matches what an immediately-following "Planung berechnen" would
   // produce. Throws on service failure rather than falling back to a local
   // implementation — the caller (ParametersPanel) shows an error instead.
   optimizeRoute: async () => {
-    const { parameters, uploadedParcels } = get()
+    const { parameters, uploadedParcels, externalGebaeude } = get()
     if (!parameters.startPoint || !parameters.endPoint) return null
+    const effectiveParcels = mergeParcelCollections(uploadedParcels, externalGebaeude)
     const optimized = await apiFetch<{ waypoints: GeoPoint[]; crossedParcelCount: number; warnings: string[] }>(
       '/api/calculate/optimize-route',
-      { method: 'POST', body: { start: parameters.startPoint, end: parameters.endPoint, uploadedParcels } },
+      { method: 'POST', body: { start: parameters.startPoint, end: parameters.endPoint, uploadedParcels: effectiveParcels } },
     )
     const routePoints = buildRoutePoints(parameters.startPoint, parameters.endPoint, optimized.waypoints)
     const smoothing = smoothSharpBends(routePoints, parameters.minDrillRadiusM, parameters.maxDeflectionAngleDeg)
@@ -347,13 +355,14 @@ export const usePlanningStore = create<PlanningState>((set, get) => ({
   // everywhere (map, 3D view, conflict detection, exported reports) instead
   // of silently drifting from what was actually planned.
   calculate: async () => {
-    const { parameters, uploadedSpartenplan, uploadedParcels, terrainElevationsM } = get()
+    const { parameters, uploadedSpartenplan, uploadedParcels, externalGebaeude, terrainElevationsM } = get()
     if (!isResolved(parameters)) return
     set({ isCalculating: true })
     try {
+      const effectiveParcels = mergeParcelCollections(uploadedParcels, externalGebaeude)
       const data = await apiFetch<CalculatePayload>('/api/calculate', {
         method: 'POST',
-        body: { parameters, uploadedSpartenplan, uploadedParcels, terrainElevationsM },
+        body: { parameters, uploadedSpartenplan, uploadedParcels: effectiveParcels, terrainElevationsM },
       })
       set((state) => ({
         result: data.result,

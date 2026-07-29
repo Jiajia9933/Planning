@@ -39,6 +39,8 @@ import {
 } from '@hdd-planner/domain'
 import type { Coord, ParcelFeatureCollection } from '@hdd-planner/domain'
 import { featureCollectionBounds } from '../../domain/geoBounds'
+import { mergeParcelCollections } from '../../domain/flurstuecke/mergeParcels'
+import { apiFetch } from '../auth/api'
 import './maplibre-dark.css'
 
 const tools = [
@@ -112,6 +114,8 @@ export function MapPanel() {
   const conflicts = usePlanningStore((s) => s.conflicts)
   const uploadedSpartenplan = usePlanningStore((s) => s.uploadedSpartenplan)
   const uploadedParcels = usePlanningStore((s) => s.uploadedParcels)
+  const externalGebaeude = usePlanningStore((s) => s.externalGebaeude)
+  const setExternalGebaeude = usePlanningStore((s) => s.setExternalGebaeude)
 
   const resolved = !!startPoint && !!endPoint
 
@@ -144,25 +148,58 @@ export function MapPanel() {
     [],
   )
 
+  // Manually uploaded Flurstücke plus live LGL-BW building footprints
+  // (Gebäude) fetched below — everything downstream (live crossing
+  // feedback, map rendering, and what gets sent to the backend for
+  // calculate/optimize) treats this as one avoidance polygon set, with no
+  // distinction between the two sources.
+  const effectiveParcels = useMemo(
+    () => mergeParcelCollections(uploadedParcels, externalGebaeude),
+    [uploadedParcels, externalGebaeude],
+  )
+
+  // Keeps externalGebaeude fresh from LGL-BW's OGC API as the route changes
+  // — debounced so dragging a waypoint doesn't fire a request per frame.
+  // Best-effort: a failed/rejected fetch (service down, bbox too large)
+  // just means no external buildings this time, not an error surfaced to
+  // the Bauleiter, since uploaded Flurstücke (if any) still work normally.
+  useEffect(() => {
+    if (!resolved) {
+      setExternalGebaeude(null)
+      return
+    }
+    const bbox = featureCollectionBounds({ type: 'FeatureCollection', features: [routeFeature] })
+    if (!bbox) return
+    const [[minLng, minLat], [maxLng, maxLat]] = bbox
+    const timeoutId = window.setTimeout(() => {
+      apiFetch<{ parcels: ParcelFeatureCollection }>(
+        `/api/gebaeude/external?bbox=${minLng},${minLat},${maxLng},${maxLat}`,
+      )
+        .then((data) => setExternalGebaeude(data.parcels))
+        .catch(() => {})
+    }, 500)
+    return () => window.clearTimeout(timeoutId)
+  }, [resolved, routeFeature, setExternalGebaeude])
+
   // Live, not gated behind "Planung berechnen" — the whole point of parcel
   // crossing feedback is to see the effect of dragging a waypoint instantly.
   const crossedParcels = useMemo(() => {
-    if (!uploadedParcels) return []
+    if (!effectiveParcels) return []
     const routeCoords = routeFeature.geometry.coordinates as Coord[]
-    return findCrossedParcels(routeCoords, uploadedParcels)
-  }, [routeFeature, uploadedParcels])
+    return findCrossedParcels(routeCoords, effectiveParcels)
+  }, [routeFeature, effectiveParcels])
 
   const parcelsForMap = useMemo<ParcelFeatureCollection | null>(() => {
-    if (!uploadedParcels) return null
+    if (!effectiveParcels) return null
     const crossedIndices = new Set(crossedParcels.map((c) => c.index))
     return {
-      ...uploadedParcels,
-      features: uploadedParcels.features.map((f, i) => ({
+      ...effectiveParcels,
+      features: effectiveParcels.features.map((f, i) => ({
         ...f,
         properties: { ...f.properties, crossed: crossedIndices.has(i) },
       })),
     }
-  }, [uploadedParcels, crossedParcels])
+  }, [effectiveParcels, crossedParcels])
   const crossingFeatureCollection = useMemo(
     () => ({
       type: 'FeatureCollection' as const,
@@ -202,7 +239,7 @@ export function MapPanel() {
 
   const handleLocateParcels = () => {
     if (!map) return
-    const bounds = featureCollectionBounds(uploadedParcels)
+    const bounds = featureCollectionBounds(effectiveParcels)
     if (bounds) map.fitBounds(bounds, { padding: 56, duration: 800 })
   }
 
@@ -341,7 +378,7 @@ export function MapPanel() {
     } else {
       ;(map.getSource('parcels') as GeoJSONSource).setData(parcelGridFeatureCollection)
     }
-    map.setLayoutProperty('parcels-layer', 'visibility', showParcels && !uploadedParcels ? 'visible' : 'none')
+    map.setLayoutProperty('parcels-layer', 'visibility', showParcels && !effectiveParcels ? 'visible' : 'none')
 
     const parcelsSourceData = parcelsForMap ?? emptyParcelFeatureCollection
     if (!map.getSource('parcels-real')) {
@@ -428,7 +465,7 @@ export function MapPanel() {
     routeFeature,
     utilityFeatureCollection,
     parcelGridFeatureCollection,
-    uploadedParcels,
+    effectiveParcels,
     parcelsForMap,
     emptyParcelFeatureCollection,
     crossingFeatureCollection,
@@ -507,7 +544,7 @@ export function MapPanel() {
           })}
         </Stack>
 
-        {uploadedParcels && (
+        {effectiveParcels && (
           <Box
             sx={{
               position: 'absolute',
@@ -528,8 +565,8 @@ export function MapPanel() {
               sx={{ fontWeight: 700, color: crossedParcels.length > 0 ? colors.accentRed : colors.textSecondary }}
             >
               {crossedParcels.length === 0
-                ? '✓ Route quert kein Flurstück'
-                : `⚠ Route quert ${crossedParcels.length} Flurstück${crossedParcels.length === 1 ? '' : 'e'}`}
+                ? '✓ Route quert kein Objekt'
+                : `⚠ Route quert ${crossedParcels.length} Objekt${crossedParcels.length === 1 ? '' : 'e'}`}
             </Typography>
             {crossedParcels.length > 0 && (
               <Stack sx={{ mt: 0.5 }}>
@@ -623,10 +660,10 @@ export function MapPanel() {
               sx={legendRowSx}
               slotProps={{ typography: { variant: 'caption' } }}
               control={<Checkbox size="small" sx={legendCheckboxSx} checked={showParcels} onChange={(_, c) => setShowParcels(c)} />}
-              label="Flurstücksgrenzen"
+              label="Objektgrenzen"
             />
-            {uploadedParcels && (
-              <Tooltip title="Zu den Flurstücken springen">
+            {effectiveParcels && (
+              <Tooltip title="Zu den Objekten springen">
                 <IconButton size="small" onClick={handleLocateParcels} sx={{ color: colors.textSecondary }}>
                   <CenterFocusStrongOutlinedIcon fontSize="inherit" sx={{ fontSize: 16 }} />
                 </IconButton>

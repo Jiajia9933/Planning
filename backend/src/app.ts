@@ -4,6 +4,7 @@ import { env } from './config/env'
 import { authRouter } from './routes/auth'
 import { projectsRouter } from './routes/projects'
 import { calculateRouter } from './routes/calculate'
+import { gebaeudeRouter } from './routes/gebaeude'
 import { errorHandler } from './middleware/errorHandler'
 
 /** Exported separately from index.ts so it can be imported directly by tests later, without starting a listener. */
@@ -23,6 +24,7 @@ export function createApp() {
   app.use('/api/auth', authRouter)
   app.use('/api/projects', projectsRouter)
   app.use('/api/calculate', calculateRouter)
+  app.use('/api/gebaeude', gebaeudeRouter)
 
   app.use(errorHandler)
 
