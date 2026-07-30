@@ -158,11 +158,15 @@ export function MapPanel() {
     [uploadedParcels, externalGebaeude],
   )
 
-  // Keeps externalGebaeude fresh from LGL-BW's OGC API as the route changes
-  // — debounced so dragging a waypoint doesn't fire a request per frame.
-  // Best-effort: a failed/rejected fetch (service down, bbox too large)
-  // just means no external buildings this time, not an error surfaced to
-  // the Bauleiter, since uploaded Flurstücke (if any) still work normally.
+  // Keeps externalGebaeude fresh as the route changes — debounced so
+  // dragging a waypoint doesn't fire a request per frame. Queries LGL-BW's
+  // live API (Baden-Württemberg) and the locally imported cache (currently
+  // just Bavaria's Oberbayern Hausumringe, see db/importGebaeudeCache.ts) in
+  // parallel and merges both — harmless no-ops outside their respective
+  // coverage areas. Best-effort: a failed/rejected fetch just means no
+  // external buildings from that source this time, not an error surfaced
+  // to the Bauleiter, since uploaded Flurstücke (if any) still work
+  // normally.
   useEffect(() => {
     if (!resolved) {
       setExternalGebaeude(null)
@@ -172,11 +176,18 @@ export function MapPanel() {
     if (!bbox) return
     const [[minLng, minLat], [maxLng, maxLat]] = bbox
     const timeoutId = window.setTimeout(() => {
-      apiFetch<{ parcels: ParcelFeatureCollection }>(
-        `/api/gebaeude/external?bbox=${minLng},${minLat},${maxLng},${maxLat}`,
-      )
-        .then((data) => setExternalGebaeude(data.parcels))
-        .catch(() => {})
+      const bboxParam = `${minLng},${minLat},${maxLng},${maxLat}`
+      Promise.all([
+        apiFetch<{ parcels: ParcelFeatureCollection }>(`/api/gebaeude/external?bbox=${bboxParam}`).catch(
+          () => null,
+        ),
+        apiFetch<{ parcels: ParcelFeatureCollection }>(
+          `/api/gebaeude/cache?bbox=${bboxParam}&source=bayern-hausumringe-oberbayern`,
+        ).catch(() => null),
+      ]).then(([live, cached]) => {
+        const merged = mergeParcelCollections(live?.parcels ?? null, cached?.parcels ?? null)
+        setExternalGebaeude(merged)
+      })
     }, 500)
     return () => window.clearTimeout(timeoutId)
   }, [resolved, routeFeature, setExternalGebaeude])

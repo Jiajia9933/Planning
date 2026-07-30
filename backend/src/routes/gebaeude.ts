@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { requireAuth } from '../middleware/auth'
 import { fetchExternalGebaeude } from '../services/gebaeudeExternalSource'
+import { queryGebaeudeCache } from '../services/gebaeudeCacheSource'
 
 export const gebaeudeRouter = Router()
 gebaeudeRouter.use(requireAuth)
@@ -28,6 +29,28 @@ gebaeudeRouter.get('/external', async (req, res, next) => {
       return
     }
     const parcels = await fetchExternalGebaeude(bbox)
+    res.json({ parcels })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// Serves locally imported Gebäude data (see db/importGebaeudeCache.ts) for
+// states without a live queryable API of their own — currently just
+// Bavaria's Oberbayern Hausumringe import.
+gebaeudeRouter.get('/cache', async (req, res, next) => {
+  try {
+    const bbox = parseBbox(req.query.bbox)
+    if (!bbox) {
+      res.status(400).json({ error: 'bbox must be "minLng,minLat,maxLng,maxLat" and span a reasonably small area' })
+      return
+    }
+    const source = typeof req.query.source === 'string' ? req.query.source : null
+    if (!source) {
+      res.status(400).json({ error: 'source is required (e.g. "bayern-hausumringe-oberbayern")' })
+      return
+    }
+    const parcels = await queryGebaeudeCache(bbox, source)
     res.json({ parcels })
   } catch (err) {
     next(err)
