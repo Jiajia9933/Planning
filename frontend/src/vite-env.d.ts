@@ -7,6 +7,11 @@ interface ImportMetaEnv {
   readonly VITE_CESIUM_ION_TOKEN?: string
   /** Base URL of the backend API, e.g. http://localhost:4000 (see backend/.env.example). */
   readonly VITE_API_BASE_URL?: string
+  /** Optional Esri API key for the satellite basemap — unlocks the
+   *  authenticated ibasemaps-api.arcgis.com endpoint. Falls back to Esri's
+   *  unauthenticated public tile server when unset (fine for local dev,
+   *  not for production per Esri's terms — see project memory). */
+  readonly VITE_ARCGIS_API_KEY?: string
 }
 
 interface ImportMeta {

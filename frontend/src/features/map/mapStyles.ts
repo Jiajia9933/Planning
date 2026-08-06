@@ -45,12 +45,22 @@ export const basemapOptions: BasemapOption[] = [
   {
     id: 'satellit',
     label: 'Satellit',
-    style: rasterStyle(
-      [
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-      ],
-      '© Esri, Maxar, Earthstar Geographics',
-    ),
+    // With a key, use Esri's licensed/authenticated tile endpoint (required
+    // for production/commercial use per Esri's terms); without one, fall
+    // back to the public unauthenticated server (fine for local dev only).
+    style: import.meta.env.VITE_ARCGIS_API_KEY
+      ? rasterStyle(
+          [
+            `https://ibasemaps-api.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}?token=${import.meta.env.VITE_ARCGIS_API_KEY}`,
+          ],
+          '© Esri, Maxar, Earthstar Geographics',
+        )
+      : rasterStyle(
+          [
+            'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+          ],
+          '© Esri, Maxar, Earthstar Geographics',
+        ),
   },
   {
     id: 'gelaende',
